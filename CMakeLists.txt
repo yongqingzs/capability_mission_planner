@@ -31,6 +31,7 @@ if(BUILD_OFFLINE_MAP_ADAPTER)
     src/nav2_multi_map_adapter/map_bundle_loader.cpp
     src/nav2_multi_map_adapter/multi_map_path_planner.cpp
     src/nav2_multi_map_adapter/offline_mission_planner.cpp
+    src/nav2_multi_map_adapter/offline_planner_config.cpp
     src/nav2_multi_map_adapter/multi_map_coordinator.cpp
     src/nav2_multi_map_adapter/plan_exporter.cpp)
   target_include_directories(capability_mission_planner_map_adapter
@@ -44,6 +45,10 @@ if(BUILD_OFFLINE_MAP_ADAPTER)
 
   add_executable(offline_map_demo examples/offline_map_demo.cpp)
   target_link_libraries(offline_map_demo PRIVATE capability_mission_planner_map_adapter)
+
+  add_executable(capability_mission_planner_cli examples/offline_planner_cli.cpp)
+  target_link_libraries(capability_mission_planner_cli PRIVATE
+    capability_mission_planner_map_adapter)
 endif()
 
 if(BUILD_IMAGE_MAP_DEMO)
@@ -71,6 +76,9 @@ if(BUILD_TESTING)
     add_test(NAME offline_adapter_tests COMMAND offline_adapter_tests
       ${CMAKE_CURRENT_SOURCE_DIR}/tmp/栅格示例/1
       ${CMAKE_CURRENT_SOURCE_DIR}/tmp/栅格示例/2)
+    add_test(NAME offline_config_validation COMMAND capability_mission_planner_cli
+      ${CMAKE_CURRENT_SOURCE_DIR}/config/offline_multi_map.yaml
+      ${CMAKE_CURRENT_BINARY_DIR}/offline_config_output)
     add_test(NAME offline_single_map_validation COMMAND offline_map_demo
       ${CMAKE_CURRENT_SOURCE_DIR}/tmp/栅格示例/1
       ${CMAKE_CURRENT_BINARY_DIR}/offline_single_map_output)

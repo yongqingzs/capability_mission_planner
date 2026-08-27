@@ -1,0 +1,190 @@
+# capability_mission_planner 离线使用说明
+
+## 1. 目录职责
+
+项目只使用一个 `build/` 目录保存编译产物。规划结果默认写入 `output/`，两者不要
+混用：
+
+```text
+build/                         CMake、目标文件和可执行程序
+config/                        任务与算法配置
+output/offline_multi_map/      一次规划的本地输出
+```
+
+`build-offline/` 和 `build-sanitize/` 只是开发阶段隔离普通构建和 sanitizer 构建
+时使用的临时目录，正常使用不需要创建。
+
+## 2. 编译和运行
+
+在项目根目录执行：
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+./build/capability_mission_planner_cli config/offline_multi_map.yaml
+```
+
+配置中的 `output_directory` 决定输出位置。也可以在命令行临时覆盖：
+
+```bash
+./build/capability_mission_planner_cli \
+  config/offline_multi_map.yaml \
+  output/my_run
+```
+
+配置文件中的相对路径以配置文件所在目录为基准，命令行覆盖的输出路径以当前工作
+目录为基准。
+
+## 3. 地图输入
+
+单地图目录包含一组标准 Nav2 YAML 和图像：
+
+```text
+map_000.yaml
+map_000.png
+```
+
+多地图目录包含多组地图，并增加地图坐标关系和跨图通道：
+
+```text
+map_000.yaml ... map_006.yaml
+map_000.png  ... map_006.png
+map_relations.csv
+transition_points.csv
+```
+
+地图配置示例：
+
+```yaml
+map:
+  directory: ../tmp/栅格示例/2
+  allow_unknown: false
+  inflation_radius_m: 0.0
+```
+
+- `allow_unknown`：是否允许路径经过未知栅格。
+- `inflation_radius_m`：按机器人安全半径膨胀障碍物，单位为米。
+
+## 4. 机器人和任务输入
+
+每台机器人配置起点、能力和是否返航：
+
+```yaml
+robots:
+  - id: a
+    start: {map_id: map_000, grid: [409, 392]}
+    capabilities: [fire, camera, stairs]
+    return_home: true
+```
+
+每个原子任务配置位置、能力要求、类型和作业时间：
+
+```yaml
+tasks:
+  - id: T1-photo
+    location: {map_id: map_000, grid: [278, 481]}
+    requirements: [camera]
+    category: gimbal_photo
+    service_seconds: 2
+    high_priority: true
+```
+
+机器人数量和任务数量不要求相等。一台机器人可以获得零个、一个或多个任务。同一
+位置的多个任务如果分给同一台机器人，会合并为一个停靠点。
+
+只有能力集合覆盖任务全部要求的机器人才能接收该任务。例如要求
+`[fire, camera]` 的任务不能交给只有 `fire` 能力的机器人。跨楼梯所需的
+`stairs` 能力也会独立检查。
+
+## 5. 位置坐标
+
+每个位置必须给出 `map_id`，并且只使用以下三种坐标表示之一。
+
+规划栅格坐标：
+
+```yaml
+location: {map_id: map_003, grid: [358, 336]}
+```
+
+该地图自身的 Nav2 局部坐标，单位为米：
+
+```yaml
+location: {map_id: map_003, local_xy: [1.25, -0.40]}
+```
+
+所有地图共用的 ROOT 平面坐标，单位为米；`map_id` 用于确定该位置属于哪张占据
+栅格：
+
+```yaml
+location: {map_id: map_003, root_xy: [4.10, 0.99]}
+```
+
+PNG 左上角坐标不能直接填入 `grid`。规划栅格原点位于左下角，转换关系为：
+
+```text
+grid_x = image_column
+grid_y = image_height - 1 - image_row
+```
+
+配置加载时会检查位置是否越界或落在障碍物上。
+
+## 6. 算法参数
+
+```yaml
+planner:
+  coordinate_conflicts: true
+  objective:
+    maximum_load_weight: 1.0
+    total_load_weight: 0.1
+  traversal:
+    time_step_seconds: 0.1
+    nominal_speed_mps: 0.5
+    default_transition_seconds: 5.0
+    map_switch_seconds: 2.0
+    transition_seconds:
+      stairs: 8.0
+      elevator: 15.0
+    transition_requirements:
+      stairs: [stairs]
+      elevator: []
+```
+
+- `coordinate_conflicts`：启用 CBS 时间协调；关闭时仍分配和规划路径，但不消解
+  机器人之间的时空冲突。
+- `maximum_load_weight`：最大单机负载权重，越大越倾向负载均衡。
+- `total_load_weight`：所有机器人总负载权重，越大越倾向减少总路程和总时间。
+- `time_step_seconds`：时间离散粒度。
+- `nominal_speed_mps`：机器人在栅格中的标称速度。
+- `default_transition_seconds`：未单独配置的通道通过时间。
+- `map_switch_seconds`：切换地图的附加时间。
+- `transition_seconds`：按通道类型配置楼梯、电梯等通过时间。
+- `transition_requirements`：按通道类型配置机器人必须具备的能力。
+
+显示参数：
+
+```yaml
+export:
+  path_thickness: 3
+  draw_grid: false
+```
+
+## 7. 输出
+
+成功后输出目录包含：
+
+```text
+plan.json
+summary.txt
+routes_map_000.png
+routes_map_001.png
+...
+```
+
+- `plan.json`：机器人的任务分配、停靠顺序、负载、栅格/局部/ROOT 坐标、逐时间
+  步调度和使用的跨图通道 ID。
+- `summary.txt`：便于人工快速阅读的路线摘要。
+- `routes_<map_id>.png`：在每张原始栅格图上叠加机器人起点、任务编号、通道和
+  规划路径。
+
+当前接口只把结果写到本地，不启动 ROS2，也不直接向机器人发送任务。

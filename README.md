@@ -68,6 +68,16 @@ Run the supplied single-map and seven-map validations with:
 ./build/offline_map_demo 'tmp/栅格示例/2' build/offline_multi_result
 ```
 
+For an actual configurable run, edit
+[`config/offline_multi_map.yaml`](config/offline_multi_map.yaml) and execute:
+
+```bash
+./build/capability_mission_planner_cli config/offline_multi_map.yaml
+```
+
+The complete Chinese input, parameter, coordinate, and output reference is in
+[`docs/offline_planner_usage_zh.md`](docs/offline_planner_usage_zh.md).
+
 No ROS2 process is started and no result is published. Each output directory
 contains:
 
