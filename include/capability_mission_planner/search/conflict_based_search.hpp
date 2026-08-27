@@ -81,7 +81,8 @@ statistical purposes.
 statistical purposes.
 */
 template <typename State, typename Action, typename Cost, typename Conflict,
-          typename Constraints, typename Environment>
+          typename Constraints, typename Environment,
+          typename StateHasher = std::hash<State> >
 class CBS {
  public:
   CBS(Environment& environment) : m_env(environment) {}
@@ -248,7 +249,8 @@ class CBS {
 
  private:
   Environment& m_env;
-  typedef AStar<State, Action, Cost, LowLevelEnvironment> LowLevelSearch_t;
+  typedef AStar<State, Action, Cost, LowLevelEnvironment, StateHasher>
+      LowLevelSearch_t;
 };
 
 } // namespace capability_mission_planner::search

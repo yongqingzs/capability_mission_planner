@@ -39,6 +39,49 @@ Validate planning on a PNG occupancy map and render the result with:
 This optional example uses system OpenCV for PNG input/output and raster
 preprocessing. The planning library itself does not depend on OpenCV.
 
+## Offline Nav2 map bundles
+
+The optional offline adapter accepts either of these local directory layouts:
+
+```text
+single_map/
+  map_000.yaml
+  map_000.png
+
+multi_map/
+  map_000.yaml ... map_N.yaml
+  map_000.png  ... map_N.png
+  map_relations.csv
+  transition_points.csv
+```
+
+Each YAML file uses the standard Nav2 `image`, `resolution`, `origin`,
+`negate`, `occupied_thresh`, `free_thresh`, and `mode` fields. Multi-map
+relations are resolved into a common ROOT coordinate frame. Transition rows
+define stairs, elevators, or other portals; traversal can require matching
+robot capabilities.
+
+Run the supplied single-map and seven-map validations with:
+
+```bash
+./build/offline_map_demo 'tmp/栅格示例/1' build/offline_single_result
+./build/offline_map_demo 'tmp/栅格示例/2' build/offline_multi_result
+```
+
+No ROS2 process is started and no result is published. Each output directory
+contains:
+
+- `plan.json`: assignments, loads, stops, grid/local/ROOT coordinates, and
+  conflict-free timed schedules;
+- `summary.txt`: compact human-readable route summary;
+- `routes_<map_id>.png`: one original occupancy map per layer with robot paths,
+  starts, tasks, and transition points overlaid.
+
+Cross-map routing uses A* inside each occupancy grid and Dijkstra over the
+sparse transition topology. Task allocation minimizes weighted maximum robot
+load plus total load. CBS then schedules progress and waits along the selected
+routes, resolving same-cell, opposing-edge, and shared-transition conflicts.
+
 ## Planning hierarchy
 
 1. Reject robot-task edges that do not satisfy every required capability.
