@@ -30,6 +30,15 @@ Run the 4-robot, 20-point, 40-atomic-task example with:
 ./build/mission_demo > mission_plan.json
 ```
 
+Validate planning on a PNG occupancy map and render the result with:
+
+```bash
+./build/image_map_demo tmp/image.png tmp/capability_mission_plan.png
+```
+
+This optional example uses system OpenCV for PNG input/output and raster
+preprocessing. The planning library itself does not depend on OpenCV.
+
 ## Planning hierarchy
 
 1. Reject robot-task edges that do not satisfy every required capability.
