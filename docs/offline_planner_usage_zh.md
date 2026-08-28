@@ -62,10 +62,14 @@ map:
   directory: ../../maps/myj1
   allow_unknown: false
   inflation_radius_m: 0.0
+  inscribed_radius_m: 0.0
+  cost_scaling_factor: 10.0
 ```
 
 - `allow_unknown`：是否允许路径经过未知栅格。
 - `inflation_radius_m`：按机器人安全半径膨胀障碍物，单位为米。
+- `inscribed_radius_m` 和 `cost_scaling_factor`：生成 Nav2 风格简化软代价场，供
+  任务级路线排序使用，不替代 Nav2 的实时 footprint 检查。
 
 ## 4. 机器人和任务输入
 
@@ -77,6 +81,9 @@ robots:
     start: {map_id: map_000, grid: [409, 392]}
     capabilities: [fire, camera, stairs]
     return_home: true
+    clearance_radius_m: 0.35
+    safety_margin_m: 0.10
+    nominal_speed_mps: 0.5
 ```
 
 每个原子任务配置位置、能力要求、类型和作业时间：
@@ -89,6 +96,7 @@ tasks:
     category: gimbal_photo
     service_seconds: 2
     high_priority: true
+    position_tolerance_m: 0.5
 ```
 
 机器人数量和任务数量不要求相等。一台机器人可以获得零个、一个或多个任务。同一
@@ -130,6 +138,9 @@ grid_y = image_height - 1 - image_row
 
 配置加载时会检查位置是否越界或落在障碍物上。
 
+`position_tolerance_m` 允许任务点在给定半径内投影到最近的可达栅格，输出给 Nav2
+时可作为目标位置容差。
+
 ## 6. 算法参数
 
 ```yaml
@@ -141,6 +152,8 @@ planner:
   traversal:
     time_step_seconds: 0.1
     nominal_speed_mps: 0.5
+    obstacle_cost_weight: 1.0
+    allow_diagonal: true
     default_transition_seconds: 5.0
     map_switch_seconds: 2.0
     transition_seconds:
@@ -157,6 +170,8 @@ planner:
 - `total_load_weight`：所有机器人总负载权重，越大越倾向减少总路程和总时间。
 - `time_step_seconds`：时间离散粒度。
 - `nominal_speed_mps`：机器人在栅格中的标称速度。
+- `obstacle_cost_weight`：靠近障碍物的软代价权重。
+- `allow_diagonal`：是否允许八连通对角移动；对角穿过障碍角会被禁止。
 - `default_transition_seconds`：未单独配置的通道通过时间。
 - `map_switch_seconds`：切换地图的附加时间。
 - `transition_seconds`：按通道类型配置楼梯、电梯等通过时间。

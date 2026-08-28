@@ -3,6 +3,8 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -37,7 +39,8 @@ CapabilitySet capabilities(const YAML::Node& node, const std::string& name) {
 GridPosition position(
   const YAML::Node& node,
   const MultiMapBundle& bundle,
-  const std::string& name)
+  const std::string& name,
+  double tolerance_m = 0.0)
 {
   require_map(node, name);
   if (!node["map_id"]) throw std::runtime_error(name + ".map_id is required");
@@ -63,13 +66,33 @@ GridPosition position(
     if (node["root_xy"]) pose = map.root_to_local(pose);
     result = map.local_to_grid(pose.x, pose.y);
   }
-  if (!bundle.traversable(result))
-    throw std::runtime_error(name + " resolves to a blocked or out-of-map cell");
+  if (!bundle.traversable(result)) {
+    if (tolerance_m <= 0.0)
+      throw std::runtime_error(name + " resolves to a blocked or out-of-map cell");
+    const int radius = static_cast<int>(std::ceil(
+      tolerance_m / map.resolution));
+    GridPosition best = result;
+    double best_distance = std::numeric_limits<double>::infinity();
+    for (int dy = -radius; dy <= radius; ++dy) {
+      for (int dx = -radius; dx <= radius; ++dx) {
+        GridPosition candidate{map_id, result.x + dx, result.y + dy};
+        if (!bundle.traversable(candidate)) continue;
+        const double distance = std::hypot(dx, dy) * map.resolution;
+        if (distance <= tolerance_m + 1e-9 && distance < best_distance) {
+          best = candidate;
+          best_distance = distance;
+        }
+      }
+    }
+    if (!bundle.traversable(best))
+      throw std::runtime_error(name + " has no traversable cell within tolerance");
+    result = best;
+  }
   return result;
 }
 
 void load_traversal(const YAML::Node& node, TraversalOptions& options) {
-  if (!node) return;
+  if (!node || node.IsNull()) return;
   require_map(node, "planner.traversal");
   if (node["time_step_seconds"])
     options.time_step_seconds = node["time_step_seconds"].as<double>();
@@ -79,6 +102,10 @@ void load_traversal(const YAML::Node& node, TraversalOptions& options) {
     options.default_transition_seconds = node["default_transition_seconds"].as<double>();
   if (node["map_switch_seconds"])
     options.map_switch_seconds = node["map_switch_seconds"].as<double>();
+  if (node["obstacle_cost_weight"])
+    options.obstacle_cost_weight = node["obstacle_cost_weight"].as<double>();
+  if (node["allow_diagonal"])
+    options.allow_diagonal = node["allow_diagonal"].as<bool>();
   if (node["transition_seconds"]) {
     require_map(node["transition_seconds"], "planner.traversal.transition_seconds");
     for (const auto& item : node["transition_seconds"])
@@ -94,7 +121,8 @@ void load_traversal(const YAML::Node& node, TraversalOptions& options) {
     }
   }
   if (!(options.time_step_seconds > 0.0) || !(options.nominal_speed_mps > 0.0) ||
-    options.default_transition_seconds < 0.0 || options.map_switch_seconds < 0.0)
+    options.default_transition_seconds < 0.0 || options.map_switch_seconds < 0.0 ||
+    options.obstacle_cost_weight < 0.0)
   {
     throw std::runtime_error("planner traversal times and speed are invalid");
   }
@@ -121,8 +149,14 @@ ConfiguredMission OfflinePlannerConfigLoader::load(
     map_options.allow_unknown = root["map"]["allow_unknown"].as<bool>();
   if (root["map"]["inflation_radius_m"])
     map_options.inflation_radius = root["map"]["inflation_radius_m"].as<double>();
+  if (root["map"]["inscribed_radius_m"])
+    map_options.inscribed_radius = root["map"]["inscribed_radius_m"].as<double>();
+  if (root["map"]["cost_scaling_factor"])
+    map_options.cost_scaling_factor = root["map"]["cost_scaling_factor"].as<double>();
   if (map_options.inflation_radius < 0.0)
     throw std::runtime_error("map.inflation_radius_m must be non-negative");
+  if (map_options.inscribed_radius < 0.0 || map_options.cost_scaling_factor <= 0.0)
+    throw std::runtime_error("map clearance cost parameters are invalid");
 
   ConfiguredMission result;
   result.bundle = MapBundleLoader::load(
@@ -168,7 +202,14 @@ ConfiguredMission OfflinePlannerConfigLoader::load(
     result.robots.push_back({node["id"].as<std::string>(),
       position(node["start"], *result.bundle, "robot start"),
       capabilities(node["capabilities"], "robot capabilities"),
-      node["return_home"] ? node["return_home"].as<bool>() : true});
+      node["return_home"] ? node["return_home"].as<bool>() : true,
+      node["clearance_radius_m"] ? node["clearance_radius_m"].as<double>() : 0.0,
+      node["safety_margin_m"] ? node["safety_margin_m"].as<double>() : 0.0,
+      node["nominal_speed_mps"] ? node["nominal_speed_mps"].as<double>() : 0.0});
+    if (result.robots.back().clearance_radius_m < 0.0 ||
+      result.robots.back().safety_margin_m < 0.0 ||
+      result.robots.back().nominal_speed_mps < 0.0)
+      throw std::runtime_error("robot navigation profile values must be non-negative");
   }
 
   if (!root["tasks"] || !root["tasks"].IsSequence())
@@ -182,12 +223,19 @@ ConfiguredMission OfflinePlannerConfigLoader::load(
       throw std::runtime_error(
         "each task requires id, location, requirements, category, and service_seconds");
     }
-    result.tasks.push_back(make_mapped_task(
+    const double tolerance = node["position_tolerance_m"] ?
+      node["position_tolerance_m"].as<double>() :
+      (node["location"]["position_tolerance_m"] ?
+        node["location"]["position_tolerance_m"].as<double>() : 0.0);
+    if (tolerance < 0.0) throw std::runtime_error("task position tolerance must be non-negative");
+    auto task = make_mapped_task(
       node["id"].as<std::string>(),
-      position(node["location"], *result.bundle, "task location"),
+      position(node["location"], *result.bundle, "task location", tolerance),
       capabilities(node["requirements"], "task requirements"),
       node["category"].as<std::string>(), node["service_seconds"].as<int>(),
-      node["high_priority"] ? node["high_priority"].as<bool>() : false));
+      node["high_priority"] ? node["high_priority"].as<bool>() : false);
+    task.position_tolerance_m = tolerance;
+    result.tasks.push_back(std::move(task));
   }
   return result;
 }

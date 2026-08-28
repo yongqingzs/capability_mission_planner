@@ -42,8 +42,12 @@ struct MapLayer {
   double root_y = 0.0;
   double root_yaw = 0.0;
   std::vector<unsigned char> traversable;
+  std::vector<float> clearance_m;
+  std::vector<unsigned char> inflated_cost;
 
   bool is_traversable(int x, int y) const;
+  double clearance(int x, int y) const;
+  unsigned char cost(int x, int y) const;
   GridPosition local_to_grid(double x, double y) const;
   MetricPose grid_to_local(const GridPosition& position) const;
   MetricPose local_to_root(const MetricPose& pose) const;
@@ -64,6 +68,8 @@ struct MapTransition {
 struct MapLoadOptions {
   bool allow_unknown = false;
   double inflation_radius = 0.0;
+  double inscribed_radius = 0.0;
+  double cost_scaling_factor = 10.0;
 };
 
 struct MultiMapBundle {
@@ -88,6 +94,8 @@ struct TraversalOptions {
   double nominal_speed_mps = 0.5;
   double default_transition_seconds = 5.0;
   double map_switch_seconds = 2.0;
+  double obstacle_cost_weight = 1.0;
+  bool allow_diagonal = true;
   std::map<std::string, double> transition_seconds{{"stairs", 8.0}, {"elevator", 15.0}};
   std::map<std::string, CapabilitySet> transition_requirements{
     {"stairs", {"stairs"}}};
@@ -114,10 +122,26 @@ public:
     const GridPosition& start,
     const GridPosition& goal,
     const CapabilitySet& capabilities = {}) const;
+  MultiMapPath plan(
+    const GridPosition& start,
+    const GridPosition& goal,
+    const CapabilitySet& capabilities,
+    double required_clearance_m) const;
+  MultiMapPath plan(
+    const GridPosition& start,
+    const GridPosition& goal,
+    const CapabilitySet& capabilities,
+    double required_clearance_m,
+    double nominal_speed_mps) const;
   int distance(
     const GridPosition& start,
     const GridPosition& goal,
     const CapabilitySet& capabilities = {}) const;
+  int distance(
+    const GridPosition& start,
+    const GridPosition& goal,
+    const CapabilitySet& capabilities,
+    double required_clearance_m) const;
   const MultiMapBundle& bundle() const { return *_bundle; }
   const TraversalOptions& options() const { return _options; }
 
@@ -133,6 +157,9 @@ struct MappedRobot {
   GridPosition start;
   CapabilitySet capabilities;
   bool return_home = true;
+  double clearance_radius_m = 0.0;
+  double safety_margin_m = 0.0;
+  double nominal_speed_mps = 0.0;
 };
 
 struct MappedTask {
@@ -140,6 +167,7 @@ struct MappedTask {
   TaskHeader header;
   GridPosition location;
   CapabilitySet requirements;
+  double position_tolerance_m = 0.0;
 
   const std::string& id() const { return booking->id(); }
   int service_duration_seconds() const;
@@ -159,6 +187,7 @@ struct MappedRouteStop {
   GridPosition location;
   std::vector<std::size_t> task_indices;
   int service_ticks = 0;
+  double position_tolerance_m = 0.0;
 };
 
 struct MappedRobotRoute {

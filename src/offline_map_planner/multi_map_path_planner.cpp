@@ -50,35 +50,53 @@ std::string position_key(const GridPosition& position) {
 std::string cache_key(
   const GridPosition& start,
   const GridPosition& goal,
-  const CapabilitySet& capabilities)
+  const CapabilitySet& capabilities,
+  double required_clearance_m,
+  double nominal_speed_mps = 0.0)
 {
   std::ostringstream output;
   output << position_key(start) << '>' << position_key(goal) << '|';
   for (const auto& capability : capabilities)
     output << capability << ',';
+  output << "|clearance=" << required_clearance_m;
+  output << "|speed=" << nominal_speed_mps;
   return output.str();
 }
 
 class GridEnvironment {
 public:
-  GridEnvironment(const MapLayer& map, GridPosition goal, int move_ticks)
-  : _map(map), _goal(std::move(goal)), _move_ticks(move_ticks) {}
+  GridEnvironment(const MapLayer& map, GridPosition goal, int move_ticks,
+    int diagonal_ticks, double required_clearance_m, double obstacle_cost_weight,
+    bool allow_diagonal)
+  : _map(map), _goal(std::move(goal)), _move_ticks(move_ticks),
+    _diagonal_ticks(diagonal_ticks), _required_clearance_m(required_clearance_m),
+    _obstacle_cost_weight(obstacle_cost_weight), _allow_diagonal(allow_diagonal) {}
 
   int admissibleHeuristic(const GridPosition& state) const {
-    return (std::abs(state.x - _goal.x) + std::abs(state.y - _goal.y)) *
-      _move_ticks;
+    const int diagonal = std::min(std::abs(state.x - _goal.x), std::abs(state.y - _goal.y));
+    const int straight = std::abs(state.x - _goal.x) + std::abs(state.y - _goal.y) - 2 * diagonal;
+    return diagonal * _diagonal_ticks + straight * _move_ticks;
   }
   bool isSolution(const GridPosition& state) const { return state == _goal; }
   void getNeighbors(
     const GridPosition& state,
     std::vector<search::Neighbor<GridPosition, GridAction, int>>& neighbors) const
   {
-    static constexpr std::array<std::array<int, 2>, 4> offsets{{
-      {{1, 0}}, {{-1, 0}}, {{0, 1}}, {{0, -1}}}};
+    static constexpr std::array<std::array<int, 2>, 8> offsets{{
+      {{1, 0}}, {{-1, 0}}, {{0, 1}}, {{0, -1}},
+      {{1, 1}}, {{1, -1}}, {{-1, 1}}, {{-1, -1}}}};
     for (const auto& offset : offsets) {
+      const bool diagonal = offset[0] != 0 && offset[1] != 0;
+      if (diagonal && !_allow_diagonal) continue;
       GridPosition next{state.map_id, state.x + offset[0], state.y + offset[1]};
-      if (_map.is_traversable(next.x, next.y))
-        neighbors.emplace_back(next, GridAction{}, _move_ticks);
+      if (!_map.is_traversable(next.x, next.y) ||
+        _map.clearance(next.x, next.y) < _required_clearance_m) continue;
+      if (diagonal && (!_map.is_traversable(state.x + offset[0], state.y) ||
+        !_map.is_traversable(state.x, state.y + offset[1]))) continue;
+      const int move_ticks = diagonal ? _diagonal_ticks : _move_ticks;
+      const int penalty = static_cast<int>(std::lround(
+        _obstacle_cost_weight * move_ticks * _map.cost(next.x, next.y) / 252.0));
+      neighbors.emplace_back(next, GridAction{}, std::max(1, move_ticks + penalty));
     }
   }
   void onExpandNode(const GridPosition&, int, int) const {}
@@ -88,6 +106,10 @@ private:
   const MapLayer& _map;
   GridPosition _goal;
   int _move_ticks;
+  int _diagonal_ticks;
+  double _required_clearance_m;
+  double _obstacle_cost_weight;
+  bool _allow_diagonal;
 };
 
 struct Previous {
@@ -115,22 +137,54 @@ MultiMapPath MultiMapPathPlanner::plan(
   const GridPosition& goal,
   const CapabilitySet& capabilities) const
 {
+  return plan(start, goal, capabilities, 0.0);
+}
+
+MultiMapPath MultiMapPathPlanner::plan(
+  const GridPosition& start,
+  const GridPosition& goal,
+  const CapabilitySet& capabilities,
+  double required_clearance_m) const
+{
+  return plan(start, goal, capabilities, required_clearance_m, 0.0);
+}
+
+MultiMapPath MultiMapPathPlanner::plan(
+  const GridPosition& start,
+  const GridPosition& goal,
+  const CapabilitySet& capabilities,
+  double required_clearance_m,
+  double nominal_speed_mps) const
+{
+  if (required_clearance_m < 0.0)
+    throw std::invalid_argument("required clearance must be non-negative");
+  const double speed = nominal_speed_mps > 0.0 ? nominal_speed_mps : _options.nominal_speed_mps;
+  if (!(speed > 0.0)) throw std::invalid_argument("nominal speed must be positive");
   if (!_bundle->traversable(start) || !_bundle->traversable(goal))
     throw std::invalid_argument("path endpoints must be traversable");
-  const auto full_key = cache_key(start, goal, capabilities);
+  const auto full_key = cache_key(start, goal, capabilities, required_clearance_m, speed);
   const auto full_cached = _cache.find(full_key);
   if (full_cached != _cache.end())
     return full_cached->second;
 
   const auto same_map_path = [&](const GridPosition& from, const GridPosition& to) {
-    const std::string key = position_key(from) + '>' + position_key(to);
+    const std::string key = position_key(from) + '>' + position_key(to) +
+      "|clearance=" + std::to_string(required_clearance_m) +
+      "|speed=" + std::to_string(speed);
     const auto cached = _segment_cache.find(key);
     if (cached != _segment_cache.end())
       return cached->second;
     const auto& map = _bundle->map(from.map_id);
     const int move_ticks = seconds_to_ticks(
-      map.resolution / _options.nominal_speed_mps, _options.time_step_seconds);
-    GridEnvironment environment(map, to, move_ticks);
+      map.resolution / speed, _options.time_step_seconds);
+    const int diagonal_ticks = seconds_to_ticks(
+      std::sqrt(2.0) * map.resolution / speed,
+      _options.time_step_seconds);
+    if (map.clearance(from.x, from.y) < required_clearance_m ||
+      map.clearance(to.x, to.y) < required_clearance_m)
+      throw std::runtime_error("path endpoint has insufficient clearance");
+    GridEnvironment environment(map, to, move_ticks, diagonal_ticks,
+      required_clearance_m, _options.obstacle_cost_weight, _options.allow_diagonal);
     search::AStar<GridPosition, GridAction, int, GridEnvironment, GridPositionHash>
       grid_search(environment);
     search::PlanResult<GridPosition, GridAction, int> result;
@@ -162,6 +216,11 @@ MultiMapPath MultiMapPathPlanner::plan(
     {
       continue;
     }
+    if (_bundle->map(transition.from_cell.map_id).clearance(
+        transition.from_cell.x, transition.from_cell.y) < required_clearance_m ||
+      _bundle->map(transition.to_cell.map_id).clearance(
+        transition.to_cell.x, transition.to_cell.y) < required_clearance_m)
+      continue;
     add_node(transition.from_cell);
     add_node(transition.to_cell);
   }
@@ -268,6 +327,15 @@ int MultiMapPathPlanner::distance(
   const CapabilitySet& capabilities) const
 {
   return plan(start, goal, capabilities).travel_ticks;
+}
+
+int MultiMapPathPlanner::distance(
+  const GridPosition& start,
+  const GridPosition& goal,
+  const CapabilitySet& capabilities,
+  double required_clearance_m) const
+{
+  return plan(start, goal, capabilities, required_clearance_m).travel_ticks;
 }
 
 } // namespace capability_mission_planner::offline

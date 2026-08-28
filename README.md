@@ -97,6 +97,12 @@ sparse transition topology. Task allocation minimizes weighted maximum robot
 load plus total load. CBS then schedules progress and waits along the selected
 routes, resolving same-cell, opposing-edge, and shared-transition conflicts.
 
+The offline planner uses a Nav2-inspired clearance cost field and optional
+robot-specific `clearance_radius_m`, `safety_margin_m`, and
+`nominal_speed_mps`. It emits task-level stops with position tolerances for
+Nav2; Nav2 remains responsible for final footprint collision checking,
+real-time replanning, and control.
+
 ## Planning hierarchy
 
 1. Reject robot-task edges that do not satisfy every required capability.

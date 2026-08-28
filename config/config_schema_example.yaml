@@ -6,6 +6,8 @@ map:
   directory: /path/to/map_bundle
   allow_unknown: false
   inflation_radius_m: 0.0
+  inscribed_radius_m: 0.0
+  cost_scaling_factor: 10.0
 output_directory: ../output/example
 planner:
   coordinate_conflicts: true
@@ -13,14 +15,20 @@ planner:
   traversal:
     time_step_seconds: 0.1
     nominal_speed_mps: 0.5
+    obstacle_cost_weight: 1.0
+    allow_diagonal: true
 robots:
   - id: robot_a
     start: {map_id: map_000, grid: [10, 10]}
     capabilities: [camera]
     return_home: true
+    clearance_radius_m: 0.25
+    safety_margin_m: 0.10
+    nominal_speed_mps: 0.5
 tasks:
   - id: task_1
     location: {map_id: map_000, grid: [20, 20]}
     requirements: [camera]
     category: gimbal_photo
     service_seconds: 2
+    position_tolerance_m: 0.5

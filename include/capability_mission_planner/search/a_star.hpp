@@ -18,9 +18,9 @@
 namespace capability_mission_planner::search {
 
 /*!
-  \example a_star.cpp Simple example using a 2D grid world and
-  up/down/left/right
-  actions
+  \example a_star.cpp Simple example using a 2D grid world. The movement
+  model (four-connected, eight-connected, graph, or otherwise) is supplied by
+  the Environment::getNeighbors implementation.
 */
 
 /*! \brief A* Algorithm to find the shortest path

@@ -1,8 +1,11 @@
 #include <capability_mission_planner/offline_map_planner.hpp>
+#include <capability_mission_planner/offline_planner_config.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -134,6 +137,95 @@ void check_multi_map_planning(const std::shared_ptr<const MultiMapBundle>& bundl
   check_schedule_conflicts(plan);
 }
 
+void check_task_level_navigation_costs(const std::shared_ptr<const MultiMapBundle>& bundle) {
+  const auto& map = bundle->maps.begin()->second;
+  GridPosition start;
+  GridPosition goal;
+  for (int y = 0; y < map.height && start.map_id.empty(); ++y) {
+    for (int x = 0; x < map.width; ++x) {
+      if (map.is_traversable(x, y) && map.clearance(x, y) > 0.5) {
+        start = {map.id, x, y};
+        break;
+      }
+    }
+  }
+  for (int y = map.height - 1; y >= 0 && goal.map_id.empty(); --y) {
+    for (int x = map.width - 1; x >= 0; --x) {
+      if (map.is_traversable(x, y) && map.clearance(x, y) > 0.5 &&
+        std::abs(x - start.x) + std::abs(y - start.y) > 20) {
+        goal = {map.id, x, y};
+        break;
+      }
+    }
+  }
+  require(!start.map_id.empty() && !goal.map_id.empty(),
+    "could not find high-clearance task-level test endpoints");
+  TraversalOptions options;
+  options.obstacle_cost_weight = 2.0;
+  options.allow_diagonal = true;
+  MultiMapPathPlanner planner(bundle, options);
+  const auto path = planner.plan(start, goal, {}, 0.25, 0.5);
+  require(!path.steps.empty(), "high-clearance task-level path is empty");
+  for (const auto& step : path.steps)
+    require(bundle->map(step.position.map_id).clearance(step.position.x, step.position.y) >= 0.25,
+      "task-level path violates robot clearance");
+}
+
+void check_task_tolerance_projection(
+  const std::filesystem::path& map_directory,
+  const std::shared_ptr<const MultiMapBundle>& bundle)
+{
+  const auto& map = bundle->maps.begin()->second;
+  GridPosition blocked;
+  GridPosition nearby_free;
+  bool found = false;
+  for (int y = 0; y < map.height && !found; ++y) {
+    for (int x = 0; x < map.width && !found; ++x) {
+      if (map.is_traversable(x, y)) continue;
+      for (int dy = -2; dy <= 2 && !found; ++dy) {
+        for (int dx = -2; dx <= 2; ++dx) {
+          if (dx == 0 && dy == 0) continue;
+          const GridPosition candidate{map.id, x + dx, y + dy};
+          if (bundle->traversable(candidate) && std::hypot(dx, dy) <= 2.0) {
+            blocked = {map.id, x, y};
+            nearby_free = candidate;
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+  require(found, "could not find blocked cell adjacent to free cell");
+
+  const auto config_path = std::filesystem::temp_directory_path() /
+    "capability_mission_planner_tolerance_test.yaml";
+  std::ofstream config(config_path);
+  require(config.good(), "could not create tolerance test config");
+  config << "version: 1\n"
+    << "map:\n  directory: " << map_directory.string() << "\n"
+    << "output_directory: tolerance-output\n"
+    << "planner:\n  traversal: {}\n"
+    << "robots:\n  - id: test\n    start:\n      map_id: " << map.id
+    << "\n      grid: [" << nearby_free.x << ", " << nearby_free.y << "]\n"
+    << "    capabilities: [camera]\n    return_home: false\n"
+    << "tasks:\n  - id: tolerant\n    location:\n      map_id: " << map.id
+    << "\n      grid: [" << blocked.x << ", " << blocked.y << "]\n"
+    << "    position_tolerance_m: " << (3.0 * map.resolution) << "\n"
+    << "    requirements: [camera]\n    category: photo\n    service_seconds: 1\n";
+  config.close();
+
+  const auto loaded = OfflinePlannerConfigLoader::load(config_path);
+  require(loaded.tasks.size() == 1U, "tolerance test task was not loaded");
+  require(loaded.tasks.front().position_tolerance_m > 0.0,
+    "task position tolerance was not preserved");
+  require(loaded.tasks.front().location != blocked,
+    "blocked task location was not projected");
+  require(bundle->traversable(loaded.tasks.front().location),
+    "projected task location is not traversable");
+  std::filesystem::remove(config_path);
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -145,6 +237,8 @@ int main(int argc, char* argv[]) {
     check_coordinate_round_trips(*single);
     check_coordinate_round_trips(*multi);
     check_multi_map_planning(multi);
+    check_task_level_navigation_costs(single);
+    check_task_tolerance_projection(argv[1], single);
     std::cout << "offline adapter tests passed\n";
     return 0;
   } catch (const std::exception& error) {

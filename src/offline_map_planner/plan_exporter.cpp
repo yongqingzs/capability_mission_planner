@@ -92,7 +92,8 @@ void write_json(
              << ", \"grid\": [" << stop.location.x << ", " << stop.location.y
              << "], \"local_xy\": [" << local.x << ", " << local.y
              << "], \"root_xy\": [" << root.x << ", " << root.y
-             << "], \"service_ticks\": " << stop.service_ticks << ", \"tasks\": [";
+             << "], \"position_tolerance_m\": " << stop.position_tolerance_m
+             << ", \"service_ticks\": " << stop.service_ticks << ", \"tasks\": [";
       for (std::size_t i = 0; i < stop.task_indices.size(); ++i) {
         if (i != 0U) output << ", ";
         output << json(tasks[stop.task_indices[i]].id());

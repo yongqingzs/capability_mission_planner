@@ -103,6 +103,8 @@ MapLayer load_map(const std::filesystem::path& yaml_path, const MapLoadOptions& 
   }
   if (mode != "trinary" && mode != "scale" && mode != "raw")
     throw std::runtime_error(yaml_path.string() + ": unsupported map mode " + mode);
+  if (options.inscribed_radius < 0.0 || options.cost_scaling_factor <= 0.0)
+    throw std::runtime_error(yaml_path.string() + ": invalid clearance cost parameters");
 
   const auto image = cv::imread(map.image_path.string(), cv::IMREAD_GRAYSCALE);
   if (image.empty())
@@ -125,6 +127,30 @@ MapLayer load_map(const std::filesystem::path& yaml_path, const MapLoadOptions& 
           free = options.allow_unknown;
       }
       free_mask.at<unsigned char>(row, column) = free ? 255U : 0U;
+    }
+  }
+
+  cv::Mat distance_pixels;
+  cv::distanceTransform(free_mask, distance_pixels, cv::DIST_L2, 3);
+  map.clearance_m.resize(static_cast<std::size_t>(map.width * map.height));
+  map.inflated_cost.resize(static_cast<std::size_t>(map.width * map.height));
+  for (int y = 0; y < map.height; ++y) {
+    const int row = map.height - 1 - y;
+    for (int x = 0; x < map.width; ++x) {
+      const double clearance = static_cast<double>(distance_pixels.at<float>(row, x)) *
+        map.resolution;
+      const auto index = static_cast<std::size_t>(y * map.width + x);
+      map.clearance_m[index] = static_cast<float>(clearance);
+      if (free_mask.at<unsigned char>(row, x) == 0U) {
+        map.inflated_cost[index] = 254U;
+      } else if (clearance <= options.inscribed_radius) {
+        map.inflated_cost[index] = 253U;
+      } else {
+        const double factor = std::exp(-options.cost_scaling_factor *
+          (clearance - options.inscribed_radius));
+        map.inflated_cost[index] = static_cast<unsigned char>(std::clamp(
+          252.0 * factor, 0.0, 252.0));
+      }
     }
   }
 
@@ -287,6 +313,18 @@ bool GridPosition::operator<(const GridPosition& other) const {
 bool MapLayer::is_traversable(int x, int y) const {
   return x >= 0 && x < width && y >= 0 && y < height &&
     traversable[static_cast<std::size_t>(y * width + x)] != 0U;
+}
+
+double MapLayer::clearance(int x, int y) const {
+  if (x < 0 || x >= width || y < 0 || y >= height || clearance_m.empty())
+    return 0.0;
+  return clearance_m[static_cast<std::size_t>(y * width + x)];
+}
+
+unsigned char MapLayer::cost(int x, int y) const {
+  if (x < 0 || x >= width || y < 0 || y >= height || inflated_cost.empty())
+    return 254U;
+  return inflated_cost[static_cast<std::size_t>(y * width + x)];
 }
 
 GridPosition MapLayer::local_to_grid(double x, double y) const {

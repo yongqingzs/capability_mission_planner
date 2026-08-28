@@ -29,15 +29,18 @@ void recompute_route(
   route.service_ticks = 0;
   route.segments.clear();
   GridPosition current = robot.start;
+  const double clearance = std::max(0.0, robot.clearance_radius_m + robot.safety_margin_m);
+  const double speed = robot.nominal_speed_mps > 0.0 ? robot.nominal_speed_mps :
+    planner.options().nominal_speed_mps;
   for (const auto& stop : route.stops) {
-    auto segment = planner.plan(current, stop.location, robot.capabilities);
+    auto segment = planner.plan(current, stop.location, robot.capabilities, clearance, speed);
     route.travel_ticks += segment.travel_ticks;
     route.service_ticks += stop.service_ticks;
     route.segments.push_back(std::move(segment));
     current = stop.location;
   }
   if (robot.return_home && !route.stops.empty()) {
-    auto segment = planner.plan(current, robot.start, robot.capabilities);
+    auto segment = planner.plan(current, robot.start, robot.capabilities, clearance, speed);
     route.travel_ticks += segment.travel_ticks;
     route.segments.push_back(std::move(segment));
   }
@@ -67,6 +70,8 @@ std::vector<MappedRobotRoute> insertion_options(
       auto merged = source;
       merged.stops[i].task_indices.push_back(task_index);
       merged.stops[i].service_ticks += service_ticks;
+      merged.stops[i].position_tolerance_m = std::max(
+        merged.stops[i].position_tolerance_m, task.position_tolerance_m);
       return {std::move(merged)};
     }
   }
@@ -75,7 +80,8 @@ std::vector<MappedRobotRoute> insertion_options(
     auto inserted = source;
     inserted.stops.insert(
       inserted.stops.begin() + static_cast<std::ptrdiff_t>(position),
-      MappedRouteStop{task.location, {task_index}, service_ticks});
+      MappedRouteStop{task.location, {task_index}, service_ticks,
+        task.position_tolerance_m});
     result.push_back(std::move(inserted));
   }
   return result;
@@ -139,7 +145,7 @@ MappedTask make_mapped_task(
     std::move(category), "offline mapped atomic task",
     std::chrono::seconds(service_seconds));
   return {std::move(booking), std::move(header), std::move(location),
-    std::move(requirements)};
+    std::move(requirements), 0.0};
 }
 
 OfflineMissionPlanner::OfflineMissionPlanner(
