@@ -19,8 +19,8 @@
 
 分析涉及以下目录：
 
-- 单地图示例：[`tmp/栅格示例/1`](../tmp/栅格示例/1)
-- 多地图示例：[`tmp/栅格示例/2`](../tmp/栅格示例/2)
+- 单地图示例：[`zju2`](../../capability_mission_scenarios/maps/zju2)
+- 多地图示例：[`myj1`](../../capability_mission_scenarios/maps/myj1)
 - 多地图构建端：`/home/jazzy/nav_t_ws/src/gridmapper`
 - 多地图使用端：`/home/jazzy/nav_t_ws/src/multi_map_nav_ros2`
 
@@ -38,7 +38,7 @@
 
 ## 3. 单地图示例分析
 
-[`tmp/栅格示例/1/map_000.yaml`](../tmp/栅格示例/1/map_000.yaml)
+[`zju2/map_000.yaml`](../../capability_mission_scenarios/maps/zju2/map_000.yaml)
 描述了一张标准 Nav2 栅格地图：
 
 ```text
@@ -105,12 +105,12 @@ Nav2 YAML 的 `origin` 第三个值可以表示地图旋转角。当前示例全
 
 ## 5. 多地图示例分析
 
-[`tmp/栅格示例/2`](../tmp/栅格示例/2) 包含：
+[`myj1`](../../capability_mission_scenarios/maps/myj1) 包含：
 
 - 7 张地图：`map_000` 至 `map_006`；
 - 每张地图各自的 PNG、分辨率、原点和尺寸；
-- [`map_relations.csv`](../tmp/栅格示例/2/map_relations.csv)；
-- [`transition_points.csv`](../tmp/栅格示例/2/transition_points.csv)。
+- [`map_relations.csv`](../../capability_mission_scenarios/maps/myj1/map_relations.csv)；
+- [`transition_points.csv`](../../capability_mission_scenarios/maps/myj1/transition_points.csv)。
 
 地图拓扑是一条双向楼梯链：
 
@@ -292,7 +292,7 @@ struct Location {
 建议将适配实现组织为独立模块：
 
 ```text
-src/nav2_multi_map_adapter/
+src/offline_map_planner/
   map_bundle_loader.cpp
   coordinate_transform.cpp
   multi_map_topology.cpp

@@ -33,7 +33,7 @@ Run the 4-robot, 20-point, 40-atomic-task example with:
 Validate planning on a PNG occupancy map and render the result with:
 
 ```bash
-./build/image_map_demo tmp/image.png tmp/capability_mission_plan.png
+./build/image_map_demo examples/data/image.png output/capability_mission_plan.png
 ```
 
 This optional example uses system OpenCV for PNG input/output and raster
@@ -61,18 +61,23 @@ relations are resolved into a common ROOT coordinate frame. Transition rows
 define stairs, elevators, or other portals; traversal can require matching
 robot capabilities.
 
-Run the supplied single-map and seven-map validations with:
+Scenario maps and mission configurations are maintained separately in
+[`capability_mission_scenarios`](../capability_mission_scenarios). Run the
+supplied single-map and seven-map validations with:
 
 ```bash
-./build/offline_map_demo 'tmp/栅格示例/1' build/offline_single_result
-./build/offline_map_demo 'tmp/栅格示例/2' build/offline_multi_result
+./build/offline_map_demo \
+  ../capability_mission_scenarios/maps/zju2 output/zju2_demo
+./build/offline_map_demo \
+  ../capability_mission_scenarios/maps/myj1 output/myj1_demo
 ```
 
-For an actual configurable run, edit
-[`config/offline_multi_map.yaml`](config/offline_multi_map.yaml) and execute:
+For an actual configurable run, edit a scenario configuration in
+[`capability_mission_scenarios`](../capability_mission_scenarios) and execute:
 
 ```bash
-./build/capability_mission_planner_cli config/offline_multi_map.yaml
+./build/capability_mission_planner_cli \
+  ../capability_mission_scenarios/configs/myj1.yaml
 ```
 
 The complete Chinese input, parameter, coordinate, and output reference is in

@@ -7,7 +7,7 @@
 
 ```text
 build/                         CMake、目标文件和可执行程序
-config/                        任务与算法配置
+config/                        配置 schema 示例
 output/offline_multi_map/      一次规划的本地输出
 ```
 
@@ -22,14 +22,15 @@ output/offline_multi_map/      一次规划的本地输出
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-./build/capability_mission_planner_cli config/offline_multi_map.yaml
+./build/capability_mission_planner_cli \
+  ../capability_mission_scenarios/configs/myj1.yaml
 ```
 
 配置中的 `output_directory` 决定输出位置。也可以在命令行临时覆盖：
 
 ```bash
 ./build/capability_mission_planner_cli \
-  config/offline_multi_map.yaml \
+  ../capability_mission_scenarios/configs/myj1.yaml \
   output/my_run
 ```
 
@@ -58,7 +59,7 @@ transition_points.csv
 
 ```yaml
 map:
-  directory: ../tmp/栅格示例/2
+  directory: ../../maps/myj1
   allow_unknown: false
   inflation_radius_m: 0.0
 ```

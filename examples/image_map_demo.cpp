@@ -320,9 +320,9 @@ cv::Mat render(
 
 int main(int argc, char* argv[]) {
   try {
-    const std::filesystem::path input = argc > 1 ? argv[1] : "tmp/image.png";
+    const std::filesystem::path input = argc > 1 ? argv[1] : "examples/data/image.png";
     const std::filesystem::path output =
-      argc > 2 ? argv[2] : "tmp/capability_mission_plan.png";
+      argc > 2 ? argv[2] : "output/capability_mission_plan.png";
     const auto image = cv::imread(input.string(), cv::IMREAD_COLOR);
     if (image.empty())
       throw std::runtime_error("could not read input PNG: " + input.string());

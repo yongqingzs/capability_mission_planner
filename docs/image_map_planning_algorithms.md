@@ -1,11 +1,11 @@
 # 栅格图像场景中的规划算法说明
 
 本文说明 `capability_mission_planner` 如何基于
-[`tmp/image.png`](../tmp/image.png) 完成地图处理、能力约束任务分配、路径规划、
+[`examples/data/image.png`](../examples/data/image.png) 完成地图处理、能力约束任务分配、路径规划、
 负载优化和多机器人时空冲突消解。
 
 最终规划结果见：
-[`tmp/capability_mission_plan.png`](../tmp/capability_mission_plan.png)。
+[`output/capability_mission_plan.png`](../output/capability_mission_plan.png)。
 
 ## 1. 完整算法流程
 
@@ -389,8 +389,8 @@ cmake --build build-image --parallel
 ctest --test-dir build-image --output-on-failure
 
 ./build-image/image_map_demo \
-  tmp/image.png \
-  tmp/capability_mission_plan.png
+  examples/data/image.png \
+  output/capability_mission_plan.png
 ```
 
 图像读取、栅格转换和结果绘制依赖系统 OpenCV；核心规划库本身不依赖 OpenCV。
