@@ -17,6 +17,8 @@ planner:
     nominal_speed_mps: 0.5
     obstacle_cost_weight: 1.0
     allow_diagonal: true
+    downsample_costmap: false
+    coarse_search_factor: 1
 robots:
   - id: robot_a
     start: {map_id: map_000, grid: [10, 10]}

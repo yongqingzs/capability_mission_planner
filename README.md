@@ -103,6 +103,11 @@ robot-specific `clearance_radius_m`, `safety_margin_m`, and
 Nav2; Nav2 remains responsible for final footprint collision checking,
 real-time replanning, and control.
 
+For large maps, set `planner.traversal.downsample_costmap: true` and choose a
+`coarse_search_factor` (typically 2 or 4) to plan directly on a conservative
+downsampled grid. This accelerates task-level planning; Nav2 must still replan
+each executable segment on its live costmap.
+
 ## Planning hierarchy
 
 1. Reject robot-task edges that do not satisfy every required capability.

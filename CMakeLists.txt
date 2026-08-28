@@ -83,9 +83,15 @@ if(BUILD_TESTING)
       add_test(NAME offline_adapter_tests COMMAND offline_adapter_tests
         ${SCENARIO_ROOT}/maps/zju2
         ${SCENARIO_ROOT}/maps/myj1)
-      add_test(NAME offline_config_validation COMMAND capability_mission_planner_cli
-        ${SCENARIO_ROOT}/configs/myj1.yaml
-        ${CMAKE_CURRENT_BINARY_DIR}/offline_config_output)
+      set(MYJ1_CONFIG ${SCENARIO_ROOT}/configs/myj1.yaml)
+      if(NOT EXISTS "${MYJ1_CONFIG}")
+        set(MYJ1_CONFIG ${SCENARIO_ROOT}/configs/myj1/myj1.yaml)
+      endif()
+      if(EXISTS "${MYJ1_CONFIG}")
+        add_test(NAME offline_config_validation COMMAND capability_mission_planner_cli
+          ${MYJ1_CONFIG}
+          ${CMAKE_CURRENT_BINARY_DIR}/offline_config_output)
+      endif()
       set(SINGLE_MAP_SCENARIOS
         01_single_generalist
         02_four_specialists
@@ -108,6 +114,21 @@ if(BUILD_TESTING)
       add_test(NAME offline_multi_map_validation COMMAND offline_map_demo
         ${SCENARIO_ROOT}/maps/myj1
         ${CMAKE_CURRENT_BINARY_DIR}/offline_multi_map_output)
+      if(EXISTS "${SCENARIO_ROOT}/configs/bdz1/01_three_corners_middle_corridors.yaml")
+        add_test(NAME single_map_bdz1_three_corners COMMAND capability_mission_planner_cli
+          ${SCENARIO_ROOT}/configs/bdz1/01_three_corners_middle_corridors.yaml
+          ${CMAKE_CURRENT_BINARY_DIR}/offline_bdz1_output)
+      endif()
+      if(EXISTS "${SCENARIO_ROOT}/configs/bdz1/02_homogeneous_shortest_path_benchmark.yaml")
+        add_test(NAME single_map_bdz1_homogeneous_benchmark COMMAND capability_mission_planner_cli
+          ${SCENARIO_ROOT}/configs/bdz1/02_homogeneous_shortest_path_benchmark.yaml
+          ${CMAKE_CURRENT_BINARY_DIR}/offline_bdz1_homogeneous_output)
+      endif()
+      if(EXISTS "${SCENARIO_ROOT}/configs/bdz1/03_homogeneous_shared_charger_benchmark.yaml")
+        add_test(NAME single_map_bdz1_shared_charger_benchmark COMMAND capability_mission_planner_cli
+          ${SCENARIO_ROOT}/configs/bdz1/03_homogeneous_shared_charger_benchmark.yaml
+          ${CMAKE_CURRENT_BINARY_DIR}/offline_bdz1_shared_charger_output)
+      endif()
     endif()
   endif()
 endif()

@@ -154,6 +154,8 @@ planner:
     nominal_speed_mps: 0.5
     obstacle_cost_weight: 1.0
     allow_diagonal: true
+    downsample_costmap: false
+    coarse_search_factor: 1
     default_transition_seconds: 5.0
     map_switch_seconds: 2.0
     transition_seconds:
@@ -172,6 +174,15 @@ planner:
 - `nominal_speed_mps`：机器人在栅格中的标称速度。
 - `obstacle_cost_weight`：靠近障碍物的软代价权重。
 - `allow_diagonal`：是否允许八连通对角移动；对角穿过障碍角会被禁止。
+- `downsample_costmap`：是否直接在降采样地图上进行任务级路径规划。开启后，
+  粗路径用于任务分配、时间估计和路线输出；Nav2 执行时仍需基于实时 costmap
+  重新规划。
+- `coarse_search_factor`：N×N 栅格降采样因子。`1` 表示原始分辨率；建议从 `2`
+  开始。粗栅格采用保守规则：净空取最小值、代价取最大值、区域内有障碍则不可通行。
+
+CLI 输出中的 `timing_*_seconds` 分别对应配置加载、任务规划、文件导出和总耗时。
+在大地图上启用降采样后，`timing_planning_seconds` 通常是最主要的可比较指标；
+最终路线是粗栅格任务级路线，Nav2 执行时必须重新规划。
 - `default_transition_seconds`：未单独配置的通道通过时间。
 - `map_switch_seconds`：切换地图的附加时间。
 - `transition_seconds`：按通道类型配置楼梯、电梯等通过时间。

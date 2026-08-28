@@ -8,6 +8,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace capability_mission_planner::offline {
 namespace {
@@ -121,6 +122,52 @@ struct Previous {
 
 } // namespace
 
+namespace {
+
+std::shared_ptr<const MultiMapBundle> make_coarse_bundle(
+  const std::shared_ptr<const MultiMapBundle>& source, unsigned int factor)
+{
+  if (factor <= 1U) return source;
+  auto result = std::make_shared<MultiMapBundle>();
+  result->directory = source->directory;
+  for (const auto& [id, original] : source->maps) {
+    MapLayer map = original;
+    map.width = (original.width + static_cast<int>(factor) - 1) /
+      static_cast<int>(factor);
+    map.height = (original.height + static_cast<int>(factor) - 1) /
+      static_cast<int>(factor);
+    map.resolution = original.resolution * factor;
+    map.traversable.assign(static_cast<std::size_t>(map.width * map.height), 0U);
+    map.clearance_m.assign(map.traversable.size(), 0.0F);
+    map.inflated_cost.assign(map.traversable.size(), 254U);
+    for (int cy = 0; cy < map.height; ++cy) {
+      for (int cx = 0; cx < map.width; ++cx) {
+        bool free = true;
+        float clearance = std::numeric_limits<float>::infinity();
+        unsigned char cost = 0U;
+        for (unsigned int dy = 0; dy < factor; ++dy) {
+          for (unsigned int dx = 0; dx < factor; ++dx) {
+            const int x = cx * static_cast<int>(factor) + static_cast<int>(dx);
+            const int y = cy * static_cast<int>(factor) + static_cast<int>(dy);
+            if (x >= original.width || y >= original.height) continue;
+            free = free && original.is_traversable(x, y);
+            clearance = std::min(clearance, static_cast<float>(original.clearance(x, y)));
+            cost = std::max(cost, original.cost(x, y));
+          }
+        }
+        const auto index = static_cast<std::size_t>(cy * map.width + cx);
+        map.traversable[index] = free ? 1U : 0U;
+        map.clearance_m[index] = std::isfinite(clearance) ? clearance : 0.0F;
+        map.inflated_cost[index] = free ? cost : 254U;
+      }
+    }
+    result->maps.emplace(id, std::move(map));
+  }
+  return result;
+}
+
+} // namespace
+
 MultiMapPathPlanner::MultiMapPathPlanner(
   std::shared_ptr<const MultiMapBundle> bundle,
   TraversalOptions options)
@@ -199,6 +246,37 @@ MultiMapPath MultiMapPathPlanner::plan(
   };
 
   if (start.map_id == goal.map_id) {
+    if (_options.downsample_costmap && _options.coarse_search_factor > 1U) {
+      if (!_coarse_bundle)
+        _coarse_bundle = make_coarse_bundle(_bundle, _options.coarse_search_factor);
+      if (!_coarse_planner) {
+        TraversalOptions coarse_options = _options;
+        coarse_options.downsample_costmap = false;
+        coarse_options.coarse_search_factor = 1U;
+        _coarse_planner = std::make_shared<MultiMapPathPlanner>(
+          _coarse_bundle, coarse_options);
+      }
+      const auto coarse_start = GridPosition{start.map_id,
+        start.x / static_cast<int>(_options.coarse_search_factor),
+        start.y / static_cast<int>(_options.coarse_search_factor)};
+      const auto coarse_goal = GridPosition{goal.map_id,
+        goal.x / static_cast<int>(_options.coarse_search_factor),
+        goal.y / static_cast<int>(_options.coarse_search_factor)};
+      const auto coarse_path = _coarse_planner->plan(
+        coarse_start, coarse_goal, capabilities, required_clearance_m, speed);
+      MultiMapPath output;
+      output.travel_ticks = coarse_path.travel_ticks;
+      const auto expand = [&](const GridPosition& position) {
+        const int factor = static_cast<int>(_options.coarse_search_factor);
+        const int x = std::min(position.x * factor + factor / 2, _bundle->map(position.map_id).width - 1);
+        const int y = std::min(position.y * factor + factor / 2, _bundle->map(position.map_id).height - 1);
+        return GridPosition{position.map_id, x, y};
+      };
+      for (const auto& step : coarse_path.steps)
+        output.steps.push_back({expand(step.position), step.arrival_tick, step.transition_id});
+      _cache.emplace(full_key, output);
+      return output;
+    }
     auto result = same_map_path(start, goal);
     _cache.emplace(full_key, result);
     return result;
@@ -327,6 +405,38 @@ int MultiMapPathPlanner::distance(
   const CapabilitySet& capabilities) const
 {
   return plan(start, goal, capabilities).travel_ticks;
+}
+
+int MultiMapPathPlanner::estimate_distance(
+  const GridPosition& start,
+  const GridPosition& goal,
+  const CapabilitySet& capabilities,
+  double required_clearance_m,
+  double nominal_speed_mps) const
+{
+  if (!_options.downsample_costmap || _options.coarse_search_factor <= 1U ||
+    start.map_id != goal.map_id)
+    return plan(start, goal, capabilities, required_clearance_m,
+      nominal_speed_mps).travel_ticks;
+  if (!_coarse_bundle)
+    _coarse_bundle = make_coarse_bundle(_bundle, _options.coarse_search_factor);
+  const auto coarse_position = [&](const GridPosition& position) {
+    return GridPosition{position.map_id,
+      position.x / static_cast<int>(_options.coarse_search_factor),
+      position.y / static_cast<int>(_options.coarse_search_factor)};
+  };
+  try {
+    if (!_coarse_planner) {
+      auto coarse_options = _options;
+      coarse_options.downsample_costmap = false;
+      coarse_options.coarse_search_factor = 1U;
+      _coarse_planner = std::make_shared<MultiMapPathPlanner>(_coarse_bundle, coarse_options);
+    }
+    return _coarse_planner->plan(coarse_position(start), coarse_position(goal),
+      capabilities, required_clearance_m, nominal_speed_mps).travel_ticks;
+  } catch (const std::runtime_error&) {
+    return distance(start, goal, capabilities, required_clearance_m);
+  }
 }
 
 int MultiMapPathPlanner::distance(

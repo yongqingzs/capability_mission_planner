@@ -23,7 +23,8 @@ bool compatible(const MappedRobot& robot, const MappedTask& task) {
 void recompute_route(
   MappedRobotRoute& route,
   const MappedRobot& robot,
-  const MultiMapPathPlanner& planner)
+  const MultiMapPathPlanner& planner,
+  bool exact_paths)
 {
   route.travel_ticks = 0;
   route.service_ticks = 0;
@@ -33,16 +34,26 @@ void recompute_route(
   const double speed = robot.nominal_speed_mps > 0.0 ? robot.nominal_speed_mps :
     planner.options().nominal_speed_mps;
   for (const auto& stop : route.stops) {
-    auto segment = planner.plan(current, stop.location, robot.capabilities, clearance, speed);
-    route.travel_ticks += segment.travel_ticks;
+    auto segment_ticks = exact_paths ?
+      planner.plan(current, stop.location, robot.capabilities, clearance, speed).travel_ticks :
+      planner.estimate_distance(current, stop.location, robot.capabilities,
+        clearance, speed);
+    route.travel_ticks += segment_ticks;
     route.service_ticks += stop.service_ticks;
-    route.segments.push_back(std::move(segment));
+  if (exact_paths)
+      route.segments.push_back(planner.plan(current, stop.location,
+        robot.capabilities, clearance, speed));
     current = stop.location;
   }
   if (robot.return_home && !route.stops.empty()) {
-    auto segment = planner.plan(current, robot.start, robot.capabilities, clearance, speed);
-    route.travel_ticks += segment.travel_ticks;
-    route.segments.push_back(std::move(segment));
+    auto segment_ticks = exact_paths ?
+      planner.plan(current, robot.start, robot.capabilities, clearance, speed).travel_ticks :
+      planner.estimate_distance(current, robot.start, robot.capabilities,
+        clearance, speed);
+    route.travel_ticks += segment_ticks;
+    if (exact_paths)
+      route.segments.push_back(planner.plan(current, robot.start,
+        robot.capabilities, clearance, speed));
   }
 }
 
@@ -218,7 +229,7 @@ OfflineMissionPlan OfflineMissionPlanner::plan(
           routes[robot_index], task_index, tasks[task_index], service_ticks[task_index]))
       {
         try {
-          recompute_route(candidate, robots[robot_index], _path_planner);
+          recompute_route(candidate, robots[robot_index], _path_planner, false);
         } catch (const std::runtime_error&) {
           continue;
         }
@@ -249,7 +260,7 @@ OfflineMissionPlan OfflineMissionPlanner::plan(
         auto without = routes;
         if (!remove_task(without[source], task_index, service_ticks[task_index]))
           continue;
-        recompute_route(without[source], robots[source], _path_planner);
+        recompute_route(without[source], robots[source], _path_planner, false);
         for (std::size_t target = 0; target < robots.size(); ++target) {
           if (!compatible(robots[target], tasks[task_index]))
             continue;
@@ -257,7 +268,7 @@ OfflineMissionPlan OfflineMissionPlanner::plan(
               without[target], task_index, tasks[task_index], service_ticks[task_index]))
           {
             try {
-              recompute_route(candidate, robots[target], _path_planner);
+              recompute_route(candidate, robots[target], _path_planner, false);
             } catch (const std::runtime_error&) {
               continue;
             }
@@ -279,6 +290,8 @@ OfflineMissionPlan OfflineMissionPlanner::plan(
 
   OfflineMissionPlan result;
   result.routes = std::move(routes);
+  for (std::size_t i = 0; i < result.routes.size(); ++i)
+    recompute_route(result.routes[i], robots[i], _path_planner, true);
   result.time_step_seconds = time_step;
   for (const auto& route : result.routes) {
     result.maximum_load_ticks = std::max(result.maximum_load_ticks, route.load_ticks());

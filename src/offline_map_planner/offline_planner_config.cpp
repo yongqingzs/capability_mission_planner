@@ -106,6 +106,10 @@ void load_traversal(const YAML::Node& node, TraversalOptions& options) {
     options.obstacle_cost_weight = node["obstacle_cost_weight"].as<double>();
   if (node["allow_diagonal"])
     options.allow_diagonal = node["allow_diagonal"].as<bool>();
+  if (node["coarse_search_factor"])
+    options.coarse_search_factor = node["coarse_search_factor"].as<unsigned int>();
+  if (node["downsample_costmap"])
+    options.downsample_costmap = node["downsample_costmap"].as<bool>();
   if (node["transition_seconds"]) {
     require_map(node["transition_seconds"], "planner.traversal.transition_seconds");
     for (const auto& item : node["transition_seconds"])
@@ -122,7 +126,7 @@ void load_traversal(const YAML::Node& node, TraversalOptions& options) {
   }
   if (!(options.time_step_seconds > 0.0) || !(options.nominal_speed_mps > 0.0) ||
     options.default_transition_seconds < 0.0 || options.map_switch_seconds < 0.0 ||
-    options.obstacle_cost_weight < 0.0)
+    options.obstacle_cost_weight < 0.0 || options.coarse_search_factor == 0U)
   {
     throw std::runtime_error("planner traversal times and speed are invalid");
   }

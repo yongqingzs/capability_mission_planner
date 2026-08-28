@@ -96,6 +96,8 @@ struct TraversalOptions {
   double map_switch_seconds = 2.0;
   double obstacle_cost_weight = 1.0;
   bool allow_diagonal = true;
+  bool downsample_costmap = false;
+  unsigned int coarse_search_factor = 1;
   std::map<std::string, double> transition_seconds{{"stairs", 8.0}, {"elevator", 15.0}};
   std::map<std::string, CapabilitySet> transition_requirements{
     {"stairs", {"stairs"}}};
@@ -142,6 +144,12 @@ public:
     const GridPosition& goal,
     const CapabilitySet& capabilities,
     double required_clearance_m) const;
+  int estimate_distance(
+    const GridPosition& start,
+    const GridPosition& goal,
+    const CapabilitySet& capabilities,
+    double required_clearance_m,
+    double nominal_speed_mps = 0.0) const;
   const MultiMapBundle& bundle() const { return *_bundle; }
   const TraversalOptions& options() const { return _options; }
 
@@ -150,6 +158,8 @@ private:
   TraversalOptions _options;
   mutable std::map<std::string, MultiMapPath> _cache;
   mutable std::map<std::string, MultiMapPath> _segment_cache;
+  mutable std::shared_ptr<const MultiMapBundle> _coarse_bundle;
+  mutable std::shared_ptr<MultiMapPathPlanner> _coarse_planner;
 };
 
 struct MappedRobot {

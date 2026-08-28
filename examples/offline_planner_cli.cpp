@@ -1,5 +1,6 @@
 #include <capability_mission_planner/offline_planner_config.hpp>
 
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 
@@ -11,15 +12,22 @@ int main(int argc, char* argv[]) {
       std::cerr << "usage: capability_mission_planner_cli CONFIG.yaml [OUTPUT_DIRECTORY]\n";
       return 2;
     }
+    const auto total_start = std::chrono::steady_clock::now();
     auto request = OfflinePlannerConfigLoader::load(argv[1]);
+    const auto loaded_at = std::chrono::steady_clock::now();
     if (argc == 3) request.output_directory = std::filesystem::absolute(argv[2]);
 
     MultiMapPathPlanner path_planner(request.bundle, request.traversal);
     OfflineMissionPlanner planner(std::move(path_planner), request.objective);
     const auto plan = planner.plan(
       request.robots, request.tasks, request.coordinate_conflicts);
+    const auto planned_at = std::chrono::steady_clock::now();
     PlanExporter::write(request.output_directory, *request.bundle,
       request.robots, request.tasks, plan, request.export_options);
+    const auto exported_at = std::chrono::steady_clock::now();
+    const auto seconds = [](const auto begin, const auto end) {
+      return std::chrono::duration<double>(end - begin).count();
+    };
 
     std::cout << "planning complete\n"
               << "  maps: " << request.bundle->maps.size() << '\n'
@@ -29,6 +37,14 @@ int main(int argc, char* argv[]) {
               << plan.maximum_load_ticks * plan.time_step_seconds << '\n'
               << "  total_load_seconds: "
               << plan.total_load_ticks * plan.time_step_seconds << '\n'
+              << "  timing_load_and_parse_seconds: "
+              << seconds(total_start, loaded_at) << '\n'
+              << "  timing_planning_seconds: "
+              << seconds(loaded_at, planned_at) << '\n'
+              << "  timing_export_seconds: "
+              << seconds(planned_at, exported_at) << '\n'
+              << "  timing_total_seconds: "
+              << seconds(total_start, exported_at) << '\n'
               << "  output: " << request.output_directory << '\n';
     return 0;
   } catch (const std::exception& error) {
