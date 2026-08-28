@@ -272,8 +272,14 @@ MultiMapPath MultiMapPathPlanner::plan(
         const int y = std::min(position.y * factor + factor / 2, _bundle->map(position.map_id).height - 1);
         return GridPosition{position.map_id, x, y};
       };
-      for (const auto& step : coarse_path.steps)
-        output.steps.push_back({expand(step.position), step.arrival_tick, step.transition_id});
+      for (std::size_t i = 0; i < coarse_path.steps.size(); ++i) {
+        const auto& step = coarse_path.steps[i];
+        // Preserve exact segment endpoints: CBS and route concatenation rely
+        // on the next segment starting at the previous task position.
+        const auto position = i == 0U ? start :
+          (i + 1U == coarse_path.steps.size() ? goal : expand(step.position));
+        output.steps.push_back({position, step.arrival_tick, step.transition_id});
+      }
       _cache.emplace(full_key, output);
       return output;
     }
