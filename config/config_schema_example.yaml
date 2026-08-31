@@ -19,6 +19,7 @@ planner:
     allow_diagonal: true
     downsample_costmap: false
     coarse_search_factor: 1
+    resource_buffer_seconds: 0.5
 robots:
   - id: robot_a
     start: {map_id: map_000, grid: [10, 10]}
@@ -26,6 +27,7 @@ robots:
     return_home: true
     clearance_radius_m: 0.25
     safety_margin_m: 0.10
+    footprint_radius_m: 0.5
     nominal_speed_mps: 0.5
 tasks:
   - id: task_1

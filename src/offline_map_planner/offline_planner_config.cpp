@@ -110,6 +110,8 @@ void load_traversal(const YAML::Node& node, TraversalOptions& options) {
     options.coarse_search_factor = node["coarse_search_factor"].as<unsigned int>();
   if (node["downsample_costmap"])
     options.downsample_costmap = node["downsample_costmap"].as<bool>();
+  if (node["resource_buffer_seconds"])
+    options.resource_buffer_seconds = node["resource_buffer_seconds"].as<double>();
   if (node["transition_seconds"]) {
     require_map(node["transition_seconds"], "planner.traversal.transition_seconds");
     for (const auto& item : node["transition_seconds"])
@@ -126,7 +128,8 @@ void load_traversal(const YAML::Node& node, TraversalOptions& options) {
   }
   if (!(options.time_step_seconds > 0.0) || !(options.nominal_speed_mps > 0.0) ||
     options.default_transition_seconds < 0.0 || options.map_switch_seconds < 0.0 ||
-    options.obstacle_cost_weight < 0.0 || options.coarse_search_factor == 0U)
+    options.obstacle_cost_weight < 0.0 || options.coarse_search_factor == 0U ||
+    options.resource_buffer_seconds < 0.0)
   {
     throw std::runtime_error("planner traversal times and speed are invalid");
   }
@@ -173,6 +176,30 @@ ConfiguredMission OfflinePlannerConfigLoader::load(
   const auto planner = root["planner"];
   if (planner) require_map(planner, "planner");
   load_traversal(planner ? planner["traversal"] : YAML::Node{}, result.traversal);
+  if (planner && planner["shared_resources"]) {
+    if (!planner["shared_resources"].IsSequence())
+      throw std::runtime_error("planner.shared_resources must be a sequence");
+    for (const auto& resource_node : planner["shared_resources"]) {
+      require_map(resource_node, "planner.shared_resources item");
+      if (!resource_node["id"] || !resource_node["cells"] ||
+        !resource_node["cells"].IsSequence())
+        throw std::runtime_error("shared resource requires id and cells");
+      SharedResource resource;
+      resource.id = resource_node["id"].as<std::string>();
+      resource.capacity = resource_node["capacity"] ?
+        resource_node["capacity"].as<std::size_t>() : 1U;
+      resource.buffer_seconds = resource_node["buffer_seconds"] ?
+        resource_node["buffer_seconds"].as<double>() : result.traversal.resource_buffer_seconds;
+      if (resource.id.empty() || resource.capacity != 1U || resource.buffer_seconds < 0.0)
+        throw std::runtime_error("invalid shared resource parameters");
+      for (const auto& cell : resource_node["cells"]) {
+        if (!cell.IsSequence() || cell.size() != 3U)
+          throw std::runtime_error("shared resource cells must be [map_id, x, y]");
+        resource.cells.push_back({cell[0].as<std::string>(), cell[1].as<int>(), cell[2].as<int>()});
+      }
+      result.traversal.shared_resources.push_back(std::move(resource));
+    }
+  }
   if (planner && planner["objective"]) {
     require_map(planner["objective"], "planner.objective");
     const auto objective = planner["objective"];
@@ -209,10 +236,12 @@ ConfiguredMission OfflinePlannerConfigLoader::load(
       node["return_home"] ? node["return_home"].as<bool>() : true,
       node["clearance_radius_m"] ? node["clearance_radius_m"].as<double>() : 0.0,
       node["safety_margin_m"] ? node["safety_margin_m"].as<double>() : 0.0,
-      node["nominal_speed_mps"] ? node["nominal_speed_mps"].as<double>() : 0.0});
+      node["nominal_speed_mps"] ? node["nominal_speed_mps"].as<double>() : 0.0,
+      node["footprint_radius_m"] ? node["footprint_radius_m"].as<double>() : 0.0});
     if (result.robots.back().clearance_radius_m < 0.0 ||
       result.robots.back().safety_margin_m < 0.0 ||
-      result.robots.back().nominal_speed_mps < 0.0)
+      result.robots.back().nominal_speed_mps < 0.0 ||
+      result.robots.back().footprint_radius_m < 0.0)
       throw std::runtime_error("robot navigation profile values must be non-negative");
   }
 

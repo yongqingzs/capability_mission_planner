@@ -35,7 +35,8 @@ if(BUILD_OFFLINE_MAP_ADAPTER)
     src/offline_map_planner/offline_mission_planner.cpp
     src/offline_map_planner/offline_planner_config.cpp
     src/offline_map_planner/multi_map_coordinator.cpp
-    src/offline_map_planner/plan_exporter.cpp)
+    src/offline_map_planner/plan_exporter.cpp
+    src/offline_map_planner/live_reservation.cpp)
   target_include_directories(capability_mission_planner_map_adapter
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -70,6 +71,11 @@ if(BUILD_TESTING)
     add_test(NAME image_map_validation COMMAND image_map_demo
       ${CMAKE_CURRENT_SOURCE_DIR}/examples/data/image.png
       ${CMAKE_CURRENT_BINARY_DIR}/capability_mission_plan.png)
+  endif()
+  if(TARGET capability_mission_planner_map_adapter)
+    add_executable(live_reservation_tests test/live_reservation_tests.cpp)
+    target_link_libraries(live_reservation_tests PRIVATE capability_mission_planner_map_adapter)
+    add_test(NAME live_reservation_tests COMMAND live_reservation_tests)
   endif()
   if(TARGET offline_map_demo)
     if(BUILD_SCENARIO_TESTS)

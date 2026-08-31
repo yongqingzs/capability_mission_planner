@@ -102,6 +102,10 @@ tasks:
 机器人数量和任务数量不要求相等。一台机器人可以获得零个、一个或多个任务。同一
 位置的多个任务如果分给同一台机器人，会合并为一个停靠点。
 
+`footprint_radius_m` 是机器人 footprint 外接圆半径。CBS 使用两机器人外接圆半径
+与安全余量之和作为最小中心距离。未填写时为 `0`，保持旧配置的点代理行为；实际
+机器狗配置必须显式填写。
+
 只有能力集合覆盖任务全部要求的机器人才能接收该任务。例如要求
 `[fire, camera]` 的任务不能交给只有 `fire` 能力的机器人。跨楼梯所需的
 `stairs` 能力也会独立检查。
@@ -156,6 +160,7 @@ planner:
     allow_diagonal: true
     downsample_costmap: false
     coarse_search_factor: 1
+    resource_buffer_seconds: 0.5
     default_transition_seconds: 5.0
     map_switch_seconds: 2.0
     transition_seconds:
@@ -179,6 +184,18 @@ planner:
   重新规划。
 - `coarse_search_factor`：N×N 栅格降采样因子。`1` 表示原始分辨率；建议从 `2`
   开始。粗栅格采用保守规则：净空取最小值、代价取最大值、区域内有障碍则不可通行。
+- `resource_buffer_seconds`：共享资源占用前后的安全缓冲时间。
+
+窄通道或交叉口可配置为共享资源：
+
+```yaml
+planner:
+  shared_resources:
+    - id: corridor-west
+      capacity: 1 # 当前版本支持互斥资源；capacity 必须为 1
+      buffer_seconds: 1.0
+      cells: [[map_000, 10, 20], [map_000, 11, 20]]
+```
 
 CLI 输出中的 `timing_*_seconds` 分别对应配置加载、任务规划、文件导出和总耗时。
 在大地图上启用降采样后，`timing_planning_seconds` 通常是最主要的可比较指标；
@@ -208,8 +225,9 @@ routes_map_001.png
 ...
 ```
 
-- `plan.json`：机器人的任务分配、停靠顺序、负载、栅格/局部/ROOT 坐标、逐时间
-  步调度和使用的跨图通道 ID。
+- `plan.json`：机器人的任务分配、停靠顺序、负载、栅格/局部/ROOT 坐标、压缩的
+  `schedule_intervals` 调度区间和使用的跨图通道 ID。CBS 内部仍按时间片求解，
+  这里只压缩连续相同状态的导出格式。
 - `summary.txt`：便于人工快速阅读的路线摘要。
 - `routes_<map_id>.png`：在每张原始栅格图上叠加机器人起点、任务编号、通道和
   规划路径。

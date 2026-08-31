@@ -35,6 +35,33 @@ std::string json(const std::string& value) {
   return output.str();
 }
 
+void write_schedule_intervals(std::ostream& output,
+  const std::vector<TimedMapState>& schedule)
+{
+  output << "[";
+  std::size_t i = 0;
+  bool first = true;
+  while (i < schedule.size()) {
+    std::size_t end = i;
+    while (end + 1U < schedule.size() &&
+      schedule[end + 1U].position == schedule[i].position &&
+      schedule[end + 1U].transition_id == schedule[i].transition_id &&
+      schedule[end + 1U].tick == schedule[end].tick + 1) ++end;
+    if (!first) output << ',';
+    first = false;
+    output << "\n        {\"start_tick\": " << schedule[i].tick
+      << ", \"end_tick\": " << schedule[end].tick
+      << ", \"map_id\": " << json(schedule[i].position.map_id)
+      << ", \"grid\": [" << schedule[i].position.x << ", "
+      << schedule[i].position.y << "]";
+    if (!schedule[i].transition_id.empty())
+      output << ", \"resource\": " << json(schedule[i].transition_id);
+    output << "}";
+    i = end + 1U;
+  }
+  output << "\n      ]";
+}
+
 cv::Point pixel(const MapLayer& map, const GridPosition& position) {
   return {position.x, map.height - 1 - position.y};
 }
@@ -100,19 +127,14 @@ void write_json(
       }
       output << "]}";
     }
-    output << "\n      ],\n      \"schedule\": [";
+    output << "\n      ],\n      \"schedule_intervals\": ";
     if (route.robot_index < plan.schedules.size()) {
       const auto& schedule = plan.schedules[route.robot_index];
-      for (std::size_t i = 0; i < schedule.size(); ++i) {
-        if (i != 0U) output << ',';
-        output << "\n        {\"tick\": " << schedule[i].tick
-               << ", \"map_id\": " << json(schedule[i].position.map_id)
-               << ", \"grid\": [" << schedule[i].position.x << ", "
-               << schedule[i].position.y << "], \"transition\": "
-               << json(schedule[i].transition_id) << "}";
-      }
+      write_schedule_intervals(output, schedule);
+    } else {
+      output << "[]";
     }
-    output << "\n      ]\n    }";
+    output << "\n    }";
     if (route_index + 1U != plan.routes.size()) output << ',';
     output << '\n';
   }

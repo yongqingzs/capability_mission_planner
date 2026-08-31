@@ -3,6 +3,7 @@
 #include <capability_mission_planner/search/conflict_based_search.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <stdexcept>
 #include <unordered_set>
@@ -134,6 +135,11 @@ std::string edge_resource(const GridPosition& first, const GridPosition& second)
     std::to_string(high.y);
 }
 
+bool is_in_transit(const std::string& resource) {
+  return resource.compare(0, 5U, "edge:") == 0 ||
+    resource.compare(0, 11U, "transition:") == 0;
+}
+
 void append_segment(std::vector<RouteFrame>& frames, const MultiMapPath& segment) {
   if (segment.steps.empty()) return;
   if (frames.back().position != segment.steps.front().position)
@@ -153,7 +159,8 @@ void append_segment(std::vector<RouteFrame>& frames, const MultiMapPath& segment
   }
 }
 
-std::vector<RouteFrame> make_frames(const MappedRobot& robot, const MappedRobotRoute& route) {
+std::vector<RouteFrame> make_frames(const MappedRobot& robot, const MappedRobotRoute& route,
+  const TraversalOptions& options) {
   std::vector<RouteFrame> frames{{robot.start, {}}};
   std::size_t segment = 0;
   for (const auto& stop : route.stops) {
@@ -166,13 +173,50 @@ std::vector<RouteFrame> make_frames(const MappedRobot& robot, const MappedRobotR
   if (segment < route.segments.size()) append_segment(frames, route.segments[segment++]);
   if (segment != route.segments.size())
     throw std::logic_error("unexpected extra path segments in route");
+  for (std::size_t i = 0; i < frames.size(); ++i) {
+    if (!frames[i].resource.empty()) continue;
+    for (const auto& resource : options.shared_resources) {
+      if (std::find(resource.cells.begin(), resource.cells.end(), frames[i].position) !=
+        resource.cells.end()) {
+        frames[i].resource = "region:" + resource.id;
+        break;
+      }
+    }
+  }
+  for (const auto& resource : options.shared_resources) {
+    const int buffer = std::max(0, static_cast<int>(std::ceil(
+      resource.buffer_seconds / options.time_step_seconds)));
+    const std::string id = "region:" + resource.id;
+    for (int i = 0; i < static_cast<int>(frames.size()); ++i) {
+      if (frames[i].resource != id) continue;
+      for (int offset = 1; offset <= buffer; ++offset) {
+        if (i - offset > 0 && frames[i - offset].resource.empty()) frames[i - offset].resource = id;
+        if (i + offset < static_cast<int>(frames.size()) && frames[i + offset].resource.empty()) frames[i + offset].resource = id;
+      }
+    }
+  }
+  if (options.resource_buffer_seconds > 0.0) {
+    const int buffer = static_cast<int>(std::ceil(
+      options.resource_buffer_seconds / options.time_step_seconds));
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+      if (frames[i].resource.empty()) continue;
+      const auto resource = frames[i].resource;
+      for (int offset = 1; offset <= buffer; ++offset) {
+        if (i > static_cast<std::size_t>(offset) && frames[i - offset].resource.empty()) frames[i - offset].resource = resource;
+        if (i + static_cast<std::size_t>(offset) < frames.size() && frames[i + offset].resource.empty()) frames[i + offset].resource = resource;
+      }
+    }
+  }
+  if (!frames.empty() && !frames.back().resource.empty())
+    frames.push_back({frames.back().position, {}});
   return frames;
 }
 
 class Environment {
 public:
-  explicit Environment(std::vector<std::vector<RouteFrame>> frames)
-  : _frames(std::move(frames)) {}
+  Environment(std::vector<std::vector<RouteFrame>> frames,
+    const MultiMapBundle& bundle, const std::vector<MappedRobot>& robots)
+  : _frames(std::move(frames)), _bundle(bundle), _robots(robots) {}
 
   void setLowLevelContext(std::size_t agent, const Constraints* constraints) {
     _agent = agent;
@@ -195,7 +239,7 @@ public:
     std::vector<search::Neighbor<State, Action, int>>& neighbors) const
   {
     // A robot may wait at a cell, but not midway through an edge or transition.
-    if (state.resource.empty()) {
+    if (!is_in_transit(state.resource)) {
       State waiting = state;
       ++waiting.tick;
       if (allowed(state, waiting)) neighbors.emplace_back(std::move(waiting), Action::Wait, 1);
@@ -220,7 +264,7 @@ public:
               a, b, {}, {}, {}, {}, first.resource};
             return true;
           }
-          if (first.position == second.position) {
+          if (positions_too_close(first.position, second.position, a, b)) {
             output = Conflict{Conflict::Type::Vertex, static_cast<int>(tick),
               a, b, first.position, first.position, second.position, second.position, {}};
             return true;
@@ -230,7 +274,8 @@ public:
           const auto second_next = state_at(plans[b], tick + 1U);
           if (first.resource.empty() && second.resource.empty() &&
             first_next.resource.empty() && second_next.resource.empty() &&
-            first.position == second_next.position && second.position == first_next.position)
+            swept_paths_too_close(first.position, first_next.position,
+              second.position, second_next.position, a, b))
           {
             output = Conflict{Conflict::Type::Edge, static_cast<int>(tick), a, b,
               first.position, first_next.position, second.position, second_next.position, {}};
@@ -246,10 +291,12 @@ public:
     std::map<std::size_t, Constraints>& output) const
   {
     if (conflict.type == Conflict::Type::Vertex) {
-      Constraints constraint;
-      constraint.vertex.insert({conflict.tick, conflict.first_to});
-      output[conflict.first] = constraint;
-      output[conflict.second] = constraint;
+      Constraints first;
+      first.vertex.insert({conflict.tick, conflict.first_to});
+      output[conflict.first] = first;
+      Constraints second;
+      second.vertex.insert({conflict.tick, conflict.second_to});
+      output[conflict.second] = second;
     } else if (conflict.type == Conflict::Type::Resource) {
       Constraints constraint;
       constraint.resource.insert({conflict.tick, conflict.resource});
@@ -269,6 +316,35 @@ public:
   void onExpandLowLevelNode(const State&, int, int) {}
 
 private:
+  MetricPose root_pose(const GridPosition& position) const {
+    const auto local = _bundle.map(position.map_id).grid_to_local(position);
+    return _bundle.map(position.map_id).local_to_root(local);
+  }
+
+  double safety_distance(std::size_t first, std::size_t second) const {
+    return _robots[first].footprint_radius_m + _robots[second].footprint_radius_m +
+      _robots[first].safety_margin_m + _robots[second].safety_margin_m;
+  }
+
+  bool positions_too_close(const GridPosition& first, const GridPosition& second,
+    std::size_t a, std::size_t b) const {
+    if (first.map_id != second.map_id) return false;
+    const auto p = root_pose(first); const auto q = root_pose(second);
+    return std::hypot(p.x - q.x, p.y - q.y) <= safety_distance(a, b) + 1e-9;
+  }
+
+  bool swept_paths_too_close(const GridPosition& af, const GridPosition& at,
+    const GridPosition& bf, const GridPosition& bt, std::size_t a, std::size_t b) const {
+    if (af.map_id != at.map_id || bf.map_id != bt.map_id || af.map_id != bf.map_id) return false;
+    const auto p = root_pose(af), q = root_pose(at), r = root_pose(bf), s = root_pose(bt);
+    const double dx = p.x - r.x, dy = p.y - r.y;
+    const double vx = (q.x - p.x) - (s.x - r.x);
+    const double vy = (q.y - p.y) - (s.y - r.y);
+    const double vv = vx * vx + vy * vy;
+    const double t = vv > 1e-12 ? std::clamp(-(dx * vx + dy * vy) / vv, 0.0, 1.0) : 0.0;
+    return std::hypot(dx + t * vx, dy + t * vy) <= safety_distance(a, b) + 1e-9;
+  }
+
   bool allowed(const State& from, const State& to) const {
     if (_constraints->vertex.count({to.tick, to.position}) != 0U) return false;
     if (!to.resource.empty() &&
@@ -279,6 +355,8 @@ private:
   }
 
   std::vector<std::vector<RouteFrame>> _frames;
+  const MultiMapBundle& _bundle;
+  const std::vector<MappedRobot>& _robots;
   std::size_t _agent = 0;
   const Constraints* _constraints = nullptr;
   int _last_goal_constraint = -1;
@@ -287,7 +365,7 @@ private:
 } // namespace
 
 std::vector<std::vector<TimedMapState>> coordinate_multi_map_routes(
-  const MultiMapPathPlanner&,
+  const MultiMapPathPlanner& path_planner,
   const std::vector<MappedRobot>& robots,
   const std::vector<MappedRobotRoute>& routes)
 {
@@ -298,12 +376,12 @@ std::vector<std::vector<TimedMapState>> coordinate_multi_map_routes(
   frames.reserve(robots.size());
   starts.reserve(robots.size());
   for (std::size_t i = 0; i < robots.size(); ++i) {
-    frames.push_back(make_frames(robots[i], routes[i]));
+    frames.push_back(make_frames(robots[i], routes[i], path_planner.options()));
     starts.push_back(State{0, 0U, frames.back().front().position,
       frames.back().front().resource});
   }
 
-  Environment environment(std::move(frames));
+  Environment environment(std::move(frames), path_planner.bundle(), robots);
   search::CBS<State, Action, int, Conflict, Constraints, Environment, StateHash> cbs(environment);
   std::vector<Plan> plans;
   if (!cbs.search(starts, plans))

@@ -89,6 +89,13 @@ public:
     const MapLoadOptions& options = {});
 };
 
+struct SharedResource {
+  std::string id;
+  std::vector<GridPosition> cells;
+  std::size_t capacity = 1;
+  double buffer_seconds = 0.0;
+};
+
 struct TraversalOptions {
   double time_step_seconds = 0.1;
   double nominal_speed_mps = 0.5;
@@ -101,6 +108,8 @@ struct TraversalOptions {
   std::map<std::string, double> transition_seconds{{"stairs", 8.0}, {"elevator", 15.0}};
   std::map<std::string, CapabilitySet> transition_requirements{
     {"stairs", {"stairs"}}};
+  double resource_buffer_seconds = 0.0;
+  std::vector<SharedResource> shared_resources;
 };
 
 struct PathStep {
@@ -170,6 +179,7 @@ struct MappedRobot {
   double clearance_radius_m = 0.0;
   double safety_margin_m = 0.0;
   double nominal_speed_mps = 0.0;
+  double footprint_radius_m = 0.0;
 };
 
 struct MappedTask {
