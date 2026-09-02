@@ -223,11 +223,42 @@ struct TimedMapState {
   GridPosition position;
   int tick = 0;
   std::string transition_id;
+  std::size_t route_frame = 0;
+  std::string resource;
+};
+
+enum class NavigationCheckpointType {
+  Start, Task, Turn, ResourceEntry, ResourceExit, TransitionEntry, TransitionExit,
+  Holding, Finish
+};
+
+struct NavigationCheckpoint {
+  NavigationCheckpointType type = NavigationCheckpointType::Turn;
+  GridPosition position;
+  int arrival_tick = 0;
+  int departure_tick = 0;
+  std::string resource;
+  std::string transition_id;
+  std::string task_id;
+  std::string id;
+};
+
+struct TrafficEvent {
+  std::string type;
+  int start_tick = 0;
+  int end_tick = 0;
+  GridPosition position;
+  std::string resource;
+  std::string reason;
+  std::string checkpoint_id;
 };
 
 struct OfflineMissionPlan {
   std::vector<MappedRobotRoute> routes;
   std::vector<std::vector<TimedMapState>> schedules;
+  std::vector<std::vector<NavigationCheckpoint>> navigation_checkpoints;
+  std::vector<std::vector<TrafficEvent>> traffic_events;
+  std::vector<SharedResource> shared_resources;
   int maximum_load_ticks = 0;
   int total_load_ticks = 0;
   double time_step_seconds = 0.1;

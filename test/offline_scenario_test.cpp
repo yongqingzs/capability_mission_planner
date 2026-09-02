@@ -46,6 +46,20 @@ void require_conflict_free(const OfflineMissionPlan& plan) {
   }
 }
 
+void require_navigation_checkpoints(const OfflineMissionPlan& plan) {
+  for (const auto& checkpoints : plan.navigation_checkpoints) {
+    require(!checkpoints.empty(), "navigation checkpoints are empty");
+    require(checkpoints.front().type == NavigationCheckpointType::Start,
+      "navigation checkpoints do not start with start");
+    require(checkpoints.back().type == NavigationCheckpointType::Finish,
+      "navigation checkpoints do not end with finish");
+    for (std::size_t i = 1; i < checkpoints.size(); ++i)
+      require(!(checkpoints[i - 1U].type == NavigationCheckpointType::Turn &&
+        checkpoints[i].type == NavigationCheckpointType::Turn),
+        "adjacent turn checkpoints were not merged");
+  }
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -92,6 +106,7 @@ int main(int argc, char* argv[]) {
       "too few merged same-location stops");
     require(plan.schedules.size() == request.robots.size(), "schedules are missing");
     require_conflict_free(plan);
+    require_navigation_checkpoints(plan);
 
     std::cout << "scenario passed: robots=" << request.robots.size()
               << " tasks=" << request.tasks.size() << " idle=" << idle

@@ -144,16 +144,12 @@ B 预约 door，时间 6 到 7  -> 接受
 
 ## 导出格式
 
-CBS 内部仍按逐时间片状态进行冲突检测。导出到 `plan.json` 时，连续相同的位置和
-状态会被压缩成 `schedule_intervals`：
+CBS 内部仍按逐时间片状态进行冲突检测。导出到 `plan.json` 时，正式输出为
+`navigation_checkpoints` 和 `traffic_events`；底层逐 tick 状态不作为导航接口：
 
 ```json
-{
-  "start_tick": 3,
-  "end_tick": 6,
-  "map_id": "map_000",
-  "grid": [10, 20]
-}
+{"type": "turn", "arrival_tick": 3,
+ "map_id": "map_000", "grid": [10, 20]}
 ```
 
 这只改变序列化体积，不改变 CBS 内部的离散时间冲突判断。

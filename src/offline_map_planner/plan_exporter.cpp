@@ -35,29 +35,61 @@ std::string json(const std::string& value) {
   return output.str();
 }
 
-void write_schedule_intervals(std::ostream& output,
-  const std::vector<TimedMapState>& schedule)
+const char* checkpoint_type(NavigationCheckpointType type) {
+  switch (type) {
+    case NavigationCheckpointType::Start: return "start";
+    case NavigationCheckpointType::Task: return "task";
+    case NavigationCheckpointType::Turn: return "turn";
+    case NavigationCheckpointType::ResourceEntry: return "resource_entry";
+    case NavigationCheckpointType::ResourceExit: return "resource_exit";
+    case NavigationCheckpointType::TransitionEntry: return "transition_entry";
+    case NavigationCheckpointType::TransitionExit: return "transition_exit";
+    case NavigationCheckpointType::Holding: return "holding";
+    case NavigationCheckpointType::Finish: return "finish";
+  }
+  return "unknown";
+}
+
+void write_position(std::ostream& output, const GridPosition& position) {
+  output << "\"map_id\": " << json(position.map_id)
+    << ", \"grid\": [" << position.x << ", " << position.y << "]";
+}
+
+void write_annotations(std::ostream& output, const OfflineMissionPlan& plan,
+  std::size_t robot)
 {
-  output << "[";
-  std::size_t i = 0;
-  bool first = true;
-  while (i < schedule.size()) {
-    std::size_t end = i;
-    while (end + 1U < schedule.size() &&
-      schedule[end + 1U].position == schedule[i].position &&
-      schedule[end + 1U].transition_id == schedule[i].transition_id &&
-      schedule[end + 1U].tick == schedule[end].tick + 1) ++end;
-    if (!first) output << ',';
-    first = false;
-    output << "\n        {\"start_tick\": " << schedule[i].tick
-      << ", \"end_tick\": " << schedule[end].tick
-      << ", \"map_id\": " << json(schedule[i].position.map_id)
-      << ", \"grid\": [" << schedule[i].position.x << ", "
-      << schedule[i].position.y << "]";
-    if (!schedule[i].transition_id.empty())
-      output << ", \"resource\": " << json(schedule[i].transition_id);
-    output << "}";
-    i = end + 1U;
+  output << ",\n      \"navigation_checkpoints\": [";
+  if (robot < plan.navigation_checkpoints.size()) {
+    const auto& points = plan.navigation_checkpoints[robot];
+    for (std::size_t i = 0; i < points.size(); ++i) {
+      const auto& point = points[i];
+      if (i != 0U) output << ',';
+      output << "\n        {\"type\": " << json(checkpoint_type(point.type))
+        << ", \"id\": " << json(point.id)
+        << ", \"arrival_tick\": " << point.arrival_tick
+        << ", \"departure_tick\": " << point.departure_tick << ", ";
+      write_position(output, point.position);
+      if (!point.task_id.empty()) output << ", \"task\": " << json(point.task_id);
+      if (!point.transition_id.empty())
+        output << ", \"transition_id\": " << json(point.transition_id);
+      if (!point.resource.empty()) output << ", \"resource\": " << json(point.resource);
+      output << "}";
+    }
+  }
+  output << "\n      ],\n      \"traffic_events\": [";
+  if (robot < plan.traffic_events.size()) {
+    const auto& events = plan.traffic_events[robot];
+    for (std::size_t i = 0; i < events.size(); ++i) {
+      const auto& event = events[i];
+      if (i != 0U) output << ',';
+      output << "\n        {\"type\": " << json(event.type)
+        << ", \"checkpoint_id\": " << json(event.checkpoint_id)
+        << ", \"start_tick\": " << event.start_tick
+        << ", \"end_tick\": " << event.end_tick << ", ";
+      write_position(output, event.position);
+      if (!event.resource.empty()) output << ", \"resource\": " << json(event.resource);
+      output << ", \"reason\": " << json(event.reason) << "}";
+    }
   }
   output << "\n      ]";
 }
@@ -127,13 +159,8 @@ void write_json(
       }
       output << "]}";
     }
-    output << "\n      ],\n      \"schedule_intervals\": ";
-    if (route.robot_index < plan.schedules.size()) {
-      const auto& schedule = plan.schedules[route.robot_index];
-      write_schedule_intervals(output, schedule);
-    } else {
-      output << "[]";
-    }
+    output << "\n      ]";
+    write_annotations(output, plan, route.robot_index);
     output << "\n    }";
     if (route_index + 1U != plan.routes.size()) output << ',';
     output << '\n';

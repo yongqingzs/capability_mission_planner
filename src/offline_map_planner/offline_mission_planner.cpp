@@ -127,6 +127,149 @@ std::size_t compatible_robot_count(
     }));
 }
 
+const SharedResource* resource_at(const std::vector<SharedResource>& resources,
+  const GridPosition& position)
+{
+  for (const auto& resource : resources)
+    if (std::find(resource.cells.begin(), resource.cells.end(), position) != resource.cells.end())
+      return &resource;
+  return nullptr;
+}
+
+int tick_at_frame(const std::vector<TimedMapState>& schedule, std::size_t frame) {
+  const auto found = std::find_if(schedule.begin(), schedule.end(), [&](const auto& state) {
+    return state.route_frame == frame;
+  });
+  return found == schedule.end() ? schedule.back().tick : found->tick;
+}
+
+void append_path_checkpoints(std::vector<NavigationCheckpoint>& points,
+  const MultiMapPath& path, std::size_t frame_offset,
+  const std::vector<TimedMapState>& schedule)
+{
+  struct TurnCandidate {
+    std::size_t index;
+    GridPosition position;
+    int tick;
+  };
+  std::vector<TurnCandidate> candidates;
+  for (std::size_t i = 1; i + 1U < path.steps.size(); ++i) {
+    const auto& previous = path.steps[i - 1U].position;
+    const auto& current = path.steps[i].position;
+    const auto& next = path.steps[i + 1U].position;
+    if (previous.map_id != current.map_id || current.map_id != next.map_id) continue;
+    const long long dx1 = current.x - previous.x, dy1 = current.y - previous.y;
+    const long long dx2 = next.x - current.x, dy2 = next.y - current.y;
+    const double norm1 = std::hypot(static_cast<double>(dx1), static_cast<double>(dy1));
+    const double norm2 = std::hypot(static_cast<double>(dx2), static_cast<double>(dy2));
+    const double cosine = (dx1 * dx2 + dy1 * dy2) / (norm1 * norm2);
+    if (cosine > std::cos(45.0 * 3.14159265358979323846 / 180.0)) continue;
+    const auto frame = frame_offset + static_cast<std::size_t>(path.steps[i].arrival_tick);
+    const int tick = tick_at_frame(schedule, frame);
+    candidates.push_back({i, current, tick});
+  }
+  // A grid path often represents one physical bend with several alternating
+  // diagonal/cardinal steps. Collapse candidates that are close along the
+  // same bend and retain its middle point as the navigation waypoint.
+  constexpr std::size_t max_turn_run = 8U;
+  std::size_t begin = 0;
+  while (begin < candidates.size()) {
+    std::size_t end = begin;
+    while (end + 1U < candidates.size() &&
+      candidates[end + 1U].index - candidates[end].index <= max_turn_run) ++end;
+    const auto& representative = candidates[begin + (end - begin) / 2U];
+    points.push_back({NavigationCheckpointType::Turn, representative.position,
+      representative.tick, representative.tick, {}, {}, {}, {}});
+    begin = end + 1U;
+  }
+  for (std::size_t i = 1; i < path.steps.size(); ++i) {
+    if (path.steps[i].transition_id.empty()) continue;
+    const auto& id = path.steps[i].transition_id;
+    const auto entry_frame = frame_offset +
+      static_cast<std::size_t>(path.steps[i - 1U].arrival_tick);
+    const auto exit_frame = frame_offset +
+      static_cast<std::size_t>(path.steps[i].arrival_tick);
+    const int entry_tick = tick_at_frame(schedule, entry_frame);
+    const int exit_tick = tick_at_frame(schedule, exit_frame);
+    points.push_back({NavigationCheckpointType::TransitionEntry,
+      path.steps[i - 1U].position, entry_tick, entry_tick, {}, id, {}, {}});
+    points.push_back({NavigationCheckpointType::TransitionExit,
+      path.steps[i].position, exit_tick, exit_tick, {}, id, {}, {}});
+  }
+}
+
+void extract_navigation_annotations(OfflineMissionPlan& plan,
+  const std::vector<MappedTask>& tasks)
+{
+  plan.navigation_checkpoints.assign(plan.schedules.size(), {});
+  plan.traffic_events.assign(plan.schedules.size(), {});
+  for (std::size_t robot = 0; robot < plan.schedules.size(); ++robot) {
+    const auto& schedule = plan.schedules[robot];
+    if (schedule.empty()) continue;
+    auto& points = plan.navigation_checkpoints[robot];
+    points.push_back({NavigationCheckpointType::Start, schedule.front().position,
+      schedule.front().tick, schedule.front().tick, {}, {}, {}, {}});
+    const auto& route = plan.routes.at(robot);
+    std::size_t frame = 0;
+    std::size_t segment = 0;
+    for (const auto& stop : route.stops) {
+      const auto& path = route.segments.at(segment++);
+      append_path_checkpoints(points, path, frame, schedule);
+      frame += static_cast<std::size_t>(path.travel_ticks);
+      const int arrival_tick = tick_at_frame(schedule, frame);
+      const int departure_tick = tick_at_frame(schedule,
+        frame + static_cast<std::size_t>(stop.service_ticks));
+      for (const auto task_index : stop.task_indices) {
+        const auto task_id = stop.task_indices.empty() ? std::string{} :
+          tasks.at(task_index).id();
+        points.push_back({NavigationCheckpointType::Task, stop.location,
+          arrival_tick, departure_tick, {}, {}, task_id, {}});
+      }
+      frame += static_cast<std::size_t>(stop.service_ticks);
+    }
+    if (segment < route.segments.size()) {
+      append_path_checkpoints(points, route.segments.at(segment), frame, schedule);
+    }
+
+    std::size_t wait_index = 0;
+    for (std::size_t i = 0; i < schedule.size(); ++i) {
+      const auto& state = schedule[i];
+      const auto* before = resource_at(plan.shared_resources, state.position);
+      const auto* after = i + 1U < schedule.size()
+        ? resource_at(plan.shared_resources, schedule[i + 1U].position) : nullptr;
+      if (before != after) {
+        if (before) points.push_back({NavigationCheckpointType::ResourceExit, state.position,
+          state.tick, state.tick, before->id, {}, {}, {}});
+        if (after) points.push_back({NavigationCheckpointType::ResourceEntry,
+          schedule[i + 1U].position, schedule[i + 1U].tick, schedule[i + 1U].tick,
+          after->id, {}, {}, {}});
+      }
+      std::size_t end = i;
+      while (end + 1U < schedule.size() &&
+        schedule[end + 1U].route_frame == state.route_frame) ++end;
+      if (end > i) {
+        const std::string checkpoint_id = "holding-" + std::to_string(wait_index++);
+        points.push_back({NavigationCheckpointType::Holding, state.position,
+          state.tick, schedule[end].tick, {}, {}, {}, checkpoint_id});
+        plan.traffic_events[robot].push_back({"wait", state.tick,
+          schedule[end].tick, state.position, {}, "coordination_delay", checkpoint_id});
+        i = end;
+      }
+    }
+    points.push_back({NavigationCheckpointType::Finish, schedule.back().position,
+      schedule.back().tick, schedule.back().tick, {}, {}, {}, {}});
+    std::stable_sort(points.begin(), points.end(), [](const auto& a, const auto& b) {
+      return a.arrival_tick < b.arrival_tick;
+    });
+    points.erase(std::unique(points.begin(), points.end(), [](const auto& a, const auto& b) {
+      return a.type == NavigationCheckpointType::Turn &&
+        b.type == NavigationCheckpointType::Turn;
+    }), points.end());
+    for (std::size_t i = 0; i < points.size(); ++i)
+      if (points[i].id.empty()) points[i].id = "checkpoint-" + std::to_string(i);
+  }
+}
+
 } // namespace
 
 int MappedTask::service_duration_seconds() const {
@@ -300,6 +443,8 @@ OfflineMissionPlan OfflineMissionPlanner::plan(
   if (coordinate_conflicts && !robots.empty()) {
     result.schedules = coordinate_multi_map_routes(
       _path_planner, robots, result.routes);
+    result.shared_resources = _path_planner.options().shared_resources;
+    extract_navigation_annotations(result, tasks);
   }
   return result;
 }

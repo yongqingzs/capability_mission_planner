@@ -225,9 +225,9 @@ routes_map_001.png
 ...
 ```
 
-- `plan.json`：机器人的任务分配、停靠顺序、负载、栅格/局部/ROOT 坐标、压缩的
-  `schedule_intervals` 调度区间和使用的跨图通道 ID。CBS 内部仍按时间片求解，
-  这里只压缩连续相同状态的导出格式。
+- `plan.json`：机器人的任务分配、停靠顺序、负载、栅格/局部/ROOT 坐标，以及
+  面向导航执行的 `navigation_checkpoints` 和冲突等待等 `traffic_events`。
+  CBS 内部仍按时间片求解，但导出只保留语义化导航关键点。
 - `summary.txt`：便于人工快速阅读的路线摘要。
 - `routes_<map_id>.png`：在每张原始栅格图上叠加机器人起点、任务编号、通道和
   规划路径。

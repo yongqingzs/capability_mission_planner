@@ -396,7 +396,8 @@ std::vector<std::vector<TimedMapState>> coordinate_multi_map_routes(
       constexpr const char prefix[] = "transition:";
       if (state.resource.compare(0, sizeof(prefix) - 1U, prefix) == 0)
         transition = state.resource.substr(sizeof(prefix) - 1U);
-      output[i].push_back({state.position, state.tick, std::move(transition)});
+      output[i].push_back({state.position, state.tick, std::move(transition),
+        state.frame, state.resource});
     }
   }
   return output;

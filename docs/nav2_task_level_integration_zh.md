@@ -20,9 +20,9 @@
 配置为共享资源并增加进入/离开缓冲。`schedule` 仍是参考计划；执行器应根据 Nav2
 实时反馈更新进度、释放已完成资源或重新申请延期资源。
 
-`plan.json` 导出 `schedule_intervals` 而不是逐 tick 的稠密数组。每个区间包含
-`start_tick`、`end_tick`、位置和可选资源字段；这只改变序列化体积，不改变 CBS
-内部的离散时间冲突判断。
+`plan.json` 导出面向执行的 `navigation_checkpoints` 和 `traffic_events`，分别表示
+导航关键位置以及冲突等待/资源事件。CBS 内部仍按时间片求解；底层逐 tick 状态仅
+作为内部协调数据，不作为正式导航输出。
 
 推荐闭环：
 
