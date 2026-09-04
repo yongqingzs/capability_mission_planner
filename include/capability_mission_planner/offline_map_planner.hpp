@@ -123,6 +123,13 @@ struct MultiMapPath {
   int travel_ticks = 0;
 };
 
+struct PathPlannerStats {
+  std::size_t estimate_requests = 0;
+  std::size_t plan_requests = 0;
+  std::size_t cache_hits = 0;
+  std::size_t grid_searches = 0;
+};
+
 class MultiMapPathPlanner {
 public:
   MultiMapPathPlanner(
@@ -161,6 +168,8 @@ public:
     double nominal_speed_mps = 0.0) const;
   const MultiMapBundle& bundle() const { return *_bundle; }
   const TraversalOptions& options() const { return _options; }
+  PathPlannerStats stats() const;
+  void reset_stats() const;
 
 private:
   std::shared_ptr<const MultiMapBundle> _bundle;
@@ -169,6 +178,7 @@ private:
   mutable std::map<std::string, MultiMapPath> _segment_cache;
   mutable std::shared_ptr<const MultiMapBundle> _coarse_bundle;
   mutable std::shared_ptr<MultiMapPathPlanner> _coarse_planner;
+  mutable PathPlannerStats _stats;
 };
 
 struct MappedRobot {
@@ -262,6 +272,8 @@ struct OfflineMissionPlan {
   int maximum_load_ticks = 0;
   int total_load_ticks = 0;
   double time_step_seconds = 0.1;
+  PathPlannerStats allocation_path_stats;
+  PathPlannerStats total_path_stats;
 };
 
 class OfflineMissionPlanner {

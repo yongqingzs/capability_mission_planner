@@ -184,6 +184,7 @@ MultiMapPath MultiMapPathPlanner::plan(
   const GridPosition& goal,
   const CapabilitySet& capabilities) const
 {
+  ++_stats.plan_requests;
   return plan(start, goal, capabilities, 0.0);
 }
 
@@ -211,16 +212,20 @@ MultiMapPath MultiMapPathPlanner::plan(
     throw std::invalid_argument("path endpoints must be traversable");
   const auto full_key = cache_key(start, goal, capabilities, required_clearance_m, speed);
   const auto full_cached = _cache.find(full_key);
-  if (full_cached != _cache.end())
+  if (full_cached != _cache.end()) {
+    ++_stats.cache_hits;
     return full_cached->second;
+  }
 
   const auto same_map_path = [&](const GridPosition& from, const GridPosition& to) {
     const std::string key = position_key(from) + '>' + position_key(to) +
       "|clearance=" + std::to_string(required_clearance_m) +
       "|speed=" + std::to_string(speed);
     const auto cached = _segment_cache.find(key);
-    if (cached != _segment_cache.end())
+    if (cached != _segment_cache.end()) {
+      ++_stats.cache_hits;
       return cached->second;
+    }
     const auto& map = _bundle->map(from.map_id);
     const int move_ticks = seconds_to_ticks(
       map.resolution / speed, _options.time_step_seconds);
@@ -234,6 +239,7 @@ MultiMapPath MultiMapPathPlanner::plan(
       required_clearance_m, _options.obstacle_cost_weight, _options.allow_diagonal);
     search::AStar<GridPosition, GridAction, int, GridEnvironment, GridPositionHash>
       grid_search(environment);
+    ++_stats.grid_searches;
     search::PlanResult<GridPosition, GridAction, int> result;
     if (!grid_search.search(from, result))
       throw std::runtime_error("no path within " + from.map_id);
@@ -420,6 +426,7 @@ int MultiMapPathPlanner::estimate_distance(
   double required_clearance_m,
   double nominal_speed_mps) const
 {
+  ++_stats.estimate_requests;
   if (!_options.downsample_costmap || _options.coarse_search_factor <= 1U ||
     start.map_id != goal.map_id)
     return plan(start, goal, capabilities, required_clearance_m,
@@ -443,6 +450,23 @@ int MultiMapPathPlanner::estimate_distance(
   } catch (const std::runtime_error&) {
     return distance(start, goal, capabilities, required_clearance_m);
   }
+}
+
+PathPlannerStats MultiMapPathPlanner::stats() const {
+  auto result = _stats;
+  if (_coarse_planner) {
+    const auto coarse = _coarse_planner->stats();
+    result.estimate_requests += coarse.estimate_requests;
+    result.plan_requests += coarse.plan_requests;
+    result.cache_hits += coarse.cache_hits;
+    result.grid_searches += coarse.grid_searches;
+  }
+  return result;
+}
+
+void MultiMapPathPlanner::reset_stats() const {
+  _stats = {};
+  if (_coarse_planner) _coarse_planner->reset_stats();
 }
 
 int MultiMapPathPlanner::distance(

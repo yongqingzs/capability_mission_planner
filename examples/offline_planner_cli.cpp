@@ -37,6 +37,12 @@ int main(int argc, char* argv[]) {
               << plan.maximum_load_ticks * plan.time_step_seconds << '\n'
               << "  total_load_seconds: "
               << plan.total_load_ticks * plan.time_step_seconds << '\n'
+              << "  allocation_estimate_requests: "
+              << plan.allocation_path_stats.estimate_requests << '\n'
+              << "  allocation_grid_searches: "
+              << plan.allocation_path_stats.grid_searches << '\n'
+              << "  total_grid_searches: "
+              << plan.total_path_stats.grid_searches << '\n'
               << "  timing_load_and_parse_seconds: "
               << seconds(total_start, loaded_at) << '\n'
               << "  timing_planning_seconds: "

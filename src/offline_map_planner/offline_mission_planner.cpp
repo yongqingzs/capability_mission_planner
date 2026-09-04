@@ -136,19 +136,13 @@ struct RouteState {
 };
 
 std::vector<RouteState> state_insertion_options(const RouteState& source,
-  std::size_t task_index, const MappedTask& task, int service_ticks, bool prune_positions = false) {
+  std::size_t task_index, const MappedTask& task, int service_ticks) {
   for (std::size_t i = 0; i < source.route.stops.size(); ++i)
     if (source.route.stops[i].location == task.location)
       return {source.merged(i, task_index, service_ticks, task.position_tolerance_m)};
   std::vector<RouteState> result;
   std::vector<std::size_t> positions;
-  if (!prune_positions) {
-    for (std::size_t i = 0; i <= source.route.stops.size(); ++i) positions.push_back(i);
-  } else {
-    positions = {source.route.stops.size()};
-    std::sort(positions.begin(), positions.end());
-    positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
-  }
+  for (std::size_t i = 0; i <= source.route.stops.size(); ++i) positions.push_back(i);
   for (const auto i : positions)
     result.push_back(source.inserted(i, MappedRouteStop{task.location, {task_index},
       service_ticks, task.position_tolerance_m}));
@@ -341,7 +335,7 @@ std::vector<MappedRobotRoute> build_routes(
     for (const auto ti : shortlist) {
       double first = std::numeric_limits<double>::infinity(), second = first;
       for (std::size_t r = 0; r < robots.size(); ++r) if (compatible(robots[r], tasks[ti])) {
-        for (const auto& candidate : state_insertion_options(states[r], ti, tasks[ti], service_ticks[ti], tasks.size() > 50U)) {
+        for (const auto& candidate : state_insertion_options(states[r], ti, tasks[ti], service_ticks[ti])) {
           auto trial = routes; trial[r] = candidate.route;
           const double score = objective(trial, weights);
           if (score < first) { second = first; first = score; }
@@ -357,7 +351,7 @@ std::vector<MappedRobotRoute> build_routes(
     const auto ti = choices.front().task;
     double best = std::numeric_limits<double>::infinity(); std::size_t owner = robots.size(); MappedRobotRoute selected;
     for (std::size_t r = 0; r < robots.size(); ++r) if (compatible(robots[r], tasks[ti])) {
-      for (auto candidate : state_insertion_options(states[r], ti, tasks[ti], service_ticks[ti], tasks.size() > 50U)) {
+      for (auto candidate : state_insertion_options(states[r], ti, tasks[ti], service_ticks[ti])) {
         auto trial = routes; trial[r] = candidate.route; const double score = objective(trial, weights);
         if (score < best) { best = score; owner = r; selected = std::move(candidate.route); }
       }
@@ -482,12 +476,15 @@ OfflineMissionPlan OfflineMissionPlanner::plan(
       task.service_duration_seconds() / time_step - 1e-9));
   });
 
+  _path_planner.reset_stats();
   auto routes = build_routes(robots, tasks, service_ticks, _path_planner, _weights, 0U);
 
   OfflineMissionPlan result;
+  result.allocation_path_stats = _path_planner.stats();
   result.routes = std::move(routes);
   for (std::size_t i = 0; i < result.routes.size(); ++i)
     recompute_route(result.routes[i], robots[i], _path_planner, true);
+  result.total_path_stats = _path_planner.stats();
   result.time_step_seconds = time_step;
   for (const auto& route : result.routes) {
     result.maximum_load_ticks = std::max(result.maximum_load_ticks, route.load_ticks());
