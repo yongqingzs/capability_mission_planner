@@ -112,6 +112,9 @@ void load_traversal(const YAML::Node& node, TraversalOptions& options) {
     options.downsample_costmap = node["downsample_costmap"].as<bool>();
   if (node["resource_buffer_seconds"])
     options.resource_buffer_seconds = node["resource_buffer_seconds"].as<double>();
+  if (node["coordination_max_high_level_nodes"])
+    options.coordination_max_high_level_nodes =
+      node["coordination_max_high_level_nodes"].as<std::size_t>();
   if (node["transition_seconds"]) {
     require_map(node["transition_seconds"], "planner.traversal.transition_seconds");
     for (const auto& item : node["transition_seconds"])

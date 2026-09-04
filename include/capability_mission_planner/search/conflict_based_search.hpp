@@ -85,7 +85,10 @@ template <typename State, typename Action, typename Cost, typename Conflict,
           typename StateHasher = std::hash<State> >
 class CBS {
  public:
-  CBS(Environment& environment) : m_env(environment) {}
+  CBS(Environment& environment, std::size_t maximum_high_level_nodes = 0U)
+      : m_env(environment), m_maximum_high_level_nodes(maximum_high_level_nodes) {}
+
+  bool limit_reached() const { return m_limit_reached; }
 
   bool search(const std::vector<State>& initialStates,
               std::vector<PlanResult<State, Action, Cost> >& solution) {
@@ -121,7 +124,12 @@ class CBS {
 
     solution.clear();
     int id = 1;
+    std::size_t expanded = 0;
     while (!open.empty()) {
+      if (m_maximum_high_level_nodes != 0U && expanded++ >= m_maximum_high_level_nodes) {
+        m_limit_reached = true;
+        return false;
+      }
       HighLevelNode P = open.top();
       m_env.onExpandHighLevelNode(P.cost);
       // std::cout << "expand: " << P << std::endl;
@@ -249,6 +257,8 @@ class CBS {
 
  private:
   Environment& m_env;
+  std::size_t m_maximum_high_level_nodes = 0U;
+  bool m_limit_reached = false;
   typedef AStar<State, Action, Cost, LowLevelEnvironment, StateHasher>
       LowLevelSearch_t;
 };

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <stdexcept>
 #include <unordered_set>
@@ -120,11 +121,8 @@ struct Conflict {
 
 using Plan = search::PlanResult<State, Action, int>;
 
-State state_at(const Plan& plan, std::size_t tick) {
-  if (tick < plan.states.size()) return plan.states[tick].first;
-  auto state = plan.states.back().first;
-  state.tick = static_cast<int>(tick);
-  return state;
+const State& state_at(const Plan& plan, std::size_t tick) {
+  return tick < plan.states.size() ? plan.states[tick].first : plan.states.back().first;
 }
 
 std::string edge_resource(const GridPosition& first, const GridPosition& second) {
@@ -257,8 +255,8 @@ public:
     for (std::size_t tick = 0; tick < horizon; ++tick) {
       for (std::size_t a = 0; a < plans.size(); ++a) {
         for (std::size_t b = a + 1U; b < plans.size(); ++b) {
-          const auto first = state_at(plans[a], tick);
-          const auto second = state_at(plans[b], tick);
+          const auto& first = state_at(plans[a], tick);
+          const auto& second = state_at(plans[b], tick);
           if (!first.resource.empty() && first.resource == second.resource) {
             output = Conflict{Conflict::Type::Resource, static_cast<int>(tick),
               a, b, {}, {}, {}, {}, first.resource};
@@ -266,19 +264,21 @@ public:
           }
           if (positions_too_close(first.position, second.position, a, b)) {
             output = Conflict{Conflict::Type::Vertex, static_cast<int>(tick),
-              a, b, first.position, first.position, second.position, second.position, {}};
+              a, b, first.position, first.position, second.position,
+              second.position, {}};
             return true;
           }
           if (tick + 1U >= horizon) continue;
-          const auto first_next = state_at(plans[a], tick + 1U);
-          const auto second_next = state_at(plans[b], tick + 1U);
+          const auto& first_next = state_at(plans[a], tick + 1U);
+          const auto& second_next = state_at(plans[b], tick + 1U);
           if (first.resource.empty() && second.resource.empty() &&
             first_next.resource.empty() && second_next.resource.empty() &&
             swept_paths_too_close(first.position, first_next.position,
               second.position, second_next.position, a, b))
           {
-            output = Conflict{Conflict::Type::Edge, static_cast<int>(tick), a, b,
-              first.position, first_next.position, second.position, second_next.position, {}};
+            output = Conflict{Conflict::Type::Edge, static_cast<int>(tick),
+              a, b, first.position, first_next.position,
+              second.position, second_next.position, {}};
             return true;
           }
         }
@@ -314,6 +314,23 @@ public:
 
   void onExpandHighLevelNode(int) {}
   void onExpandLowLevelNode(const State&, int, int) {}
+
+  bool allowedAgainstPlans(std::size_t agent, const State& from, const State& to,
+    const std::vector<Plan>& plans, const std::vector<std::size_t>& fixed) const {
+    for (const auto other : fixed) {
+      const auto& other_to = state_at(plans[other], static_cast<std::size_t>(to.tick));
+      if (!to.resource.empty() && to.resource == other_to.resource) return false;
+      if (positions_too_close(to.position, other_to.position, agent, other)) return false;
+      const auto& other_from = state_at(plans[other], static_cast<std::size_t>(from.tick));
+      if (from.resource.empty() && to.resource.empty() &&
+        other_from.resource.empty() && other_to.resource.empty() &&
+        swept_paths_too_close(from.position, to.position, other_from.position,
+          other_to.position, agent, other)) return false;
+    }
+    return true;
+  }
+
+
 
 private:
   MetricPose root_pose(const GridPosition& position) const {
@@ -362,6 +379,61 @@ private:
   int _last_goal_constraint = -1;
 };
 
+class PrioritizedEnvironment {
+public:
+  PrioritizedEnvironment(Environment& environment, std::size_t agent,
+    const std::vector<Plan>& plans, const std::vector<std::size_t>& fixed,
+    int maximum_tick, double heuristic_weight)
+  : _environment(environment), _agent(agent), _plans(plans), _fixed(fixed),
+    _maximum_tick(maximum_tick), _heuristic_weight(heuristic_weight) {
+    _environment.setLowLevelContext(agent, &_constraints);
+  }
+  int admissibleHeuristic(const State& state) const {
+    return static_cast<int>(std::ceil(
+      _environment.admissibleHeuristic(state) * _heuristic_weight));
+  }
+  bool isSolution(const State& state) const { return _environment.isSolution(state); }
+  void getNeighbors(const State& state,
+    std::vector<search::Neighbor<State, Action, int>>& neighbors) const {
+    if (state.tick >= _maximum_tick) { neighbors.clear(); return; }
+    _environment.getNeighbors(state, neighbors);
+    neighbors.erase(std::remove_if(neighbors.begin(), neighbors.end(), [&](const auto& next) {
+      return !_environment.allowedAgainstPlans(
+        _agent, state, next.state, _plans, _fixed);
+    }), neighbors.end());
+  }
+  void onExpandNode(const State& state, int f_score, int g_score) const {
+    _environment.onExpandLowLevelNode(state, f_score, g_score);
+  }
+  void onDiscover(const State&, int, int) const {}
+
+private:
+  Environment& _environment;
+  std::size_t _agent;
+  const std::vector<Plan>& _plans;
+  const std::vector<std::size_t>& _fixed;
+  int _maximum_tick;
+  double _heuristic_weight;
+  Constraints _constraints;
+};
+
+bool prioritized_schedule(Environment& environment, const std::vector<State>& starts,
+  int maximum_tick, std::vector<Plan>& plans) {
+  constexpr double heuristic_weight = 2.0;
+  plans.assign(starts.size(), {});
+  std::vector<std::size_t> fixed;
+  for (std::size_t agent = 0; agent < starts.size(); ++agent) {
+    PrioritizedEnvironment low_level_environment(
+      environment, agent, plans, fixed, maximum_tick, heuristic_weight);
+    search::AStar<State, Action, int, PrioritizedEnvironment, StateHash> low_level(
+      low_level_environment);
+    if (!low_level.search(starts[agent], plans[agent])) return false;
+    fixed.push_back(agent);
+  }
+  Conflict conflict;
+  return !environment.getFirstConflict(plans, conflict);
+}
+
 } // namespace
 
 std::vector<std::vector<TimedMapState>> coordinate_multi_map_routes(
@@ -373,19 +445,29 @@ std::vector<std::vector<TimedMapState>> coordinate_multi_map_routes(
     throw std::invalid_argument("robot and route counts must match");
   std::vector<std::vector<RouteFrame>> frames;
   std::vector<State> starts;
+  std::size_t maximum_tick = 0U;
   frames.reserve(robots.size());
   starts.reserve(robots.size());
   for (std::size_t i = 0; i < robots.size(); ++i) {
     frames.push_back(make_frames(robots[i], routes[i], path_planner.options()));
+    maximum_tick += frames.back().size();
     starts.push_back(State{0, 0U, frames.back().front().position,
       frames.back().front().resource});
   }
 
   Environment environment(std::move(frames), path_planner.bundle(), robots);
-  search::CBS<State, Action, int, Conflict, Constraints, Environment, StateHash> cbs(environment);
   std::vector<Plan> plans;
-  if (!cbs.search(starts, plans))
-    throw std::runtime_error("multi-map CBS could not find a conflict-free schedule");
+  if (!prioritized_schedule(environment, starts,
+    static_cast<int>(std::min(maximum_tick,
+      static_cast<std::size_t>(std::numeric_limits<int>::max()))), plans)) {
+    search::CBS<State, Action, int, Conflict, Constraints, Environment, StateHash> cbs(
+      environment, path_planner.options().coordination_max_high_level_nodes);
+    if (!cbs.search(starts, plans)) {
+      if (cbs.limit_reached())
+        throw std::runtime_error("multi-map CBS reached its high-level node limit");
+      throw std::runtime_error("multi-map CBS could not find a conflict-free schedule");
+    }
+  }
 
   std::vector<std::vector<TimedMapState>> output(plans.size());
   for (std::size_t i = 0; i < plans.size(); ++i) {

@@ -109,6 +109,7 @@ struct TraversalOptions {
   std::map<std::string, CapabilitySet> transition_requirements{
     {"stairs", {"stairs"}}};
   double resource_buffer_seconds = 0.0;
+  std::size_t coordination_max_high_level_nodes = 128U;
   std::vector<SharedResource> shared_resources;
 };
 
